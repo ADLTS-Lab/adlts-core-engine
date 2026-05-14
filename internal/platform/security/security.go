@@ -8,43 +8,56 @@ import (
 	"strings"
 	"time"
 
-	"adlts/internal/platform/domain"
-
 	"github.com/golang-jwt/jwt/v5"
+	"github.com/google/uuid"
 	"golang.org/x/crypto/bcrypt"
 )
+
+type EntityType string
+
+const (
+	EntityCandidate         EntityType = "candidate"
+	EntityExpert            EntityType = "expert"
+	EntityAdmin             EntityType = "admin"
+	EntitySuperAdmin        EntityType = "super_admin"
+	EntityInstitute         EntityType = "institute"
+	EntityTransportAuthority EntityType = "transport_authority"
+)
+
+type Claims struct {
+	SubjectID    uuid.UUID  `json:"sub_id"`
+	EntityType   EntityType `json:"entity_type"`
+	Email        string     `json:"email"`
+	TestCenterID *uuid.UUID `json:"test_center_id,omitempty"`
+	jwt.RegisteredClaims
+}
+
+type AuthContext struct {
+	SubjectID    uuid.UUID
+	EntityType   EntityType
+	Email        string
+	TestCenterID *uuid.UUID
+}
 
 type Manager struct {
 	secret []byte
 }
 
-type Claims struct {
-	UserID      string      `json:"user_id"`
-	Role        domain.Role `json:"role"`
-	Email       string      `json:"email"`
-	OTPVerified bool        `json:"otp_verified"`
-	jwt.RegisteredClaims
-}
-
-type UserReader interface {
-	FindUser(id string) (*domain.User, bool)
-}
-
-type userContextKey struct{}
+type authContextKey struct{}
 
 func NewManager(secret string) *Manager {
 	return &Manager{secret: []byte(secret)}
 }
 
-func (m *Manager) Sign(user *domain.User, otpVerified bool) (string, error) {
+func (m *Manager) Sign(id uuid.UUID, entityType EntityType, email string, testCenterID *uuid.UUID) (string, error) {
 	now := time.Now().UTC()
 	claims := Claims{
-		UserID:      user.ID,
-		Role:        user.Role,
-		Email:       user.Email,
-		OTPVerified: otpVerified,
+		SubjectID:    id,
+		EntityType:   entityType,
+		Email:        email,
+		TestCenterID: testCenterID,
 		RegisteredClaims: jwt.RegisteredClaims{
-			Subject:   user.ID,
+			Subject:   id.String(),
 			IssuedAt:  jwt.NewNumericDate(now),
 			ExpiresAt: jwt.NewNumericDate(now.Add(12 * time.Hour)),
 			NotBefore: jwt.NewNumericDate(now.Add(-1 * time.Minute)),
@@ -85,16 +98,7 @@ func CheckPassword(hash, password string) error {
 	return bcrypt.CompareHashAndPassword([]byte(hash), []byte(password))
 }
 
-func WithUser(ctx context.Context, user *domain.User) context.Context {
-	return context.WithValue(ctx, userContextKey{}, user)
-}
-
-func CurrentUser(r *http.Request) (*domain.User, bool) {
-	user, ok := r.Context().Value(userContextKey{}).(*domain.User)
-	return user, ok
-}
-
-func Authenticate(manager *Manager, reader UserReader) func(http.Handler) http.Handler {
+func Authenticate(manager *Manager) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			tokenString := r.Header.Get("Authorization")
@@ -112,31 +116,32 @@ func Authenticate(manager *Manager, reader UserReader) func(http.Handler) http.H
 				http.Error(w, "invalid token", http.StatusUnauthorized)
 				return
 			}
-			user, ok := reader.FindUser(claims.UserID)
-			if !ok {
-				http.Error(w, "user not found", http.StatusUnauthorized)
-				return
-			}
-			if user.Status != domain.AccountActive {
-				http.Error(w, "account is not active", http.StatusForbidden)
-				return
-			}
-			ctx := WithUser(r.Context(), user)
+			ctx := context.WithValue(r.Context(), authContextKey{}, &AuthContext{
+				SubjectID:    claims.SubjectID,
+				EntityType:   claims.EntityType,
+				Email:        claims.Email,
+				TestCenterID: claims.TestCenterID,
+			})
 			next.ServeHTTP(w, r.WithContext(ctx))
 		})
 	}
 }
 
-func RequireRoles(allowed ...domain.Role) func(http.Handler) http.Handler {
+func CurrentAuth(r *http.Request) (*AuthContext, bool) {
+	auth, ok := r.Context().Value(authContextKey{}).(*AuthContext)
+	return auth, ok
+}
+
+func RequireEntities(allowed ...EntityType) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			user, ok := CurrentUser(r)
+			auth, ok := CurrentAuth(r)
 			if !ok {
 				http.Error(w, "unauthorized", http.StatusUnauthorized)
 				return
 			}
-			for _, role := range allowed {
-				if user.Role == role {
+			for _, e := range allowed {
+				if auth.EntityType == e {
 					next.ServeHTTP(w, r)
 					return
 				}
@@ -150,7 +155,7 @@ func RequireInternalToken(expected string) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			if expected == "" {
-				http.Error(w, "internal token is not configured", http.StatusForbidden)
+				http.Error(w, "internal token not configured", http.StatusForbidden)
 				return
 			}
 			if got := r.Header.Get("X-Internal-Token"); got != expected {
