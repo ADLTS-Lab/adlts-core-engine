@@ -1,0 +1,51 @@
+name: adlts
+
+services:
+  # ── PostgreSQL ──────────────────────────────────────────────────────────────
+  db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: adlts
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: password
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ./migrations:/docker-entrypoint-initdb.d:ro   # auto-runs on first boot
+    ports:
+      - "5433:5432"    # host:5433 → container:5432 (avoids conflict with local PG)
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d adlts"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # ── ADLTS API ───────────────────────────────────────────────────────────────
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      # Override database host for Docker networking
+      DATABASE_URL: postgres://postgres:password@db:5432/adlts?sslmode=disable
+      # Store uploads in the mounted volume
+      UPLOADS_DIR: /uploads
+    ports:
+      - "8080:8080"
+    volumes:
+      - uploads:/uploads
+    depends_on:
+      db:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:8080/health || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
+volumes:
+  pgdata:
+  uploads:
