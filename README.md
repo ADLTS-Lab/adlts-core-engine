@@ -12,7 +12,7 @@ ADLTS Core Engine is the Go backend for the Automated Driving License Testing Sy
 
 1. Copy the environment file or create a local `.env` file.
 2. Set `DATABASE_URL` and `JWT_SECRET` at minimum.
-3. Apply the migration in `migrations/001_schema.sql` to your database.
+3. Apply the migrations in `migrations/001_schema.sql` and `migrations/002_booking_scheduling_payment.sql` to your database.
 4. Start the server:
 
 ```bash
@@ -30,11 +30,16 @@ The API listens on `PORT` and defaults to `8080`.
 | `JWT_SECRET` | Yes | Secret used to sign and verify access tokens |
 | `PORT` | No | HTTP port, default `8080` |
 | `INTERNAL_API_KEY` | No | Shared secret for internal endpoints |
+| `APP_URL` | No | Public API base URL for building email and payment callback links |
 | `SUPER_ADMIN_NAME` | No | Seeded root super-admin name, default `Root Admin` |
 | `SUPER_ADMIN_EMAIL` | No | Seeded root super-admin email, default `root@adlts.et` |
 | `SUPER_ADMIN_PASSWORD` | No | Seeded root super-admin password |
 | `UPLOADS_DIR` | No | Base directory for uploaded media, default `../uploads` |
 | `MEDIA_MAX_SIZE_MB` | No | Maximum upload size, default `5` |
+| `FRONTEND_BASE_URL` | No | Frontend base URL for payment return links |
+| `CHAPA_SECRET_KEY` | No | Chapa API secret key |
+| `CHAPA_WEBHOOK_SECRET` | No | Chapa webhook signature secret |
+| `CHAPA_BASE_URL` | No | Chapa API base URL, default `https://api.chapa.co/v1` |
 | `SMTP_HOST` | No | SMTP server host |
 | `SMTP_PORT` | No | SMTP server port, default `587` |
 | `SMTP_USER` | No | SMTP username |
@@ -79,7 +84,18 @@ Versioned API root: `/api/v1`
 - `super-admins`: list, self profile, update, and deletion flows restricted to super-admins
 - `invitations`: create, list, retrieve, resend, and cancel
 
-At present, `internal/identity` is the only mounted API module. The remaining domains in `internal/` are scaffolded for later modules.
+At present, `internal/identity` and `internal/booking` are mounted API modules. The remaining domains in `internal/` are scaffolded for later modules.
+
+## Payment Gateway
+
+Provider: Chapa (https://chapa.co) via hosted checkout.
+
+Chapa supports Telebirr, CBE Birr, Amole, Visa/Mastercard, and bank transfers on their hosted page. This backend only uses:
+
+1. `POST /transaction/initialize` to get a checkout URL
+2. `GET /transaction/verify/{tx_ref}` to confirm payment status
+
+Known limitations (out of scope for v1): direct integrations with Telebirr, CBE Birr, Awash, Dashen/Amole, or Stripe.
 
 ## Architectural Organization
 
