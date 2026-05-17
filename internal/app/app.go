@@ -6,11 +6,13 @@ import (
 	"net/http"
 	"time"
 
+	"adlts/internal/appeal"
 	"adlts/internal/identity"
 	"adlts/internal/platform/config"
 	"adlts/internal/platform/mailer"
 	"adlts/internal/platform/media"
 	"adlts/internal/platform/security"
+	"adlts/internal/recording"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
@@ -26,7 +28,7 @@ func Build(cfg config.Config, db *pgxpool.Pool, logger *slog.Logger) *http.Serve
 	mail := mailer.New(cfg.SMTPHost, cfg.SMTPPort, cfg.SMTPUser, cfg.SMTPPassword, cfg.SMTPFrom, cfg.SMTPFromName)
 
 	identitySvc := identity.NewService(identity.NewRepository(db), tokens, mail)
-	
+
 	// Seed root super-admin gracefully
 	if err := identitySvc.SeedSuperAdmin(context.Background(), cfg.SuperAdminName, cfg.SuperAdminEmail, cfg.SuperAdminPassword); err != nil {
 		logger.Error("failed to seed super admin", "error", err)
@@ -38,7 +40,15 @@ func Build(cfg config.Config, db *pgxpool.Pool, logger *slog.Logger) *http.Serve
 	// TODO: sessionHandler  := session.NewHandler(...)
 	// TODO: iotHandler      := iot.NewHandler(...)
 	// TODO: scoringHandler  := scoring.NewHandler(...)
-	// TODO: appealHandler   := appeal.NewHandler(...)
+	// Appeal handler
+	appealRepo := appeal.NewRepository(db)
+	appealSvc := appeal.NewService(appealRepo, db)
+	appealHandler := appeal.NewHandler(appealSvc)
+	// Recording (playback-only) handler
+	recordingRepo := recording.NewRepository(db)
+	minioClient, _ := recording.NewMinioClientFromEnv()
+	recordingSvc := recording.NewService(recordingRepo, minioClient)
+	recordingHandler := recording.NewHandler(recordingSvc)
 	// TODO: reportingHandler := reporting.NewHandler(...)
 
 	// ── HTTP server ────────────────────────────────────────────────────────────
@@ -61,6 +71,8 @@ func Build(cfg config.Config, db *pgxpool.Pool, logger *slog.Logger) *http.Serve
 
 	r.Route("/api/v1", func(api chi.Router) {
 		identityHandler.Mount(api)
+		appealHandler.Mount(api)
+		recordingHandler.Mount(api)
 		// bookingHandler.Mount(api)
 		// sessionHandler.Mount(api)
 		// iotHandler.Mount(api)

@@ -11,7 +11,7 @@ Automated Driving License Testing System backend implemented as a Go modular mon
 
 ## Run locally
 
-1. Copy `.env.example` to `.env` and adjust secrets if needed.
+1. Set`.env` and adjust secrets if needed.
 2. Install Go 1.22 or later.
 3. From the project root, run:
 

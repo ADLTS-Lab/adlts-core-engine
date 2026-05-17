@@ -9,6 +9,7 @@ import (
 type Appeal struct {
 	ID          uuid.UUID    `db:"id"`
 	SessionID   uuid.UUID    `db:"session_id"`
+	TestID      uuid.UUID    `db:"test_id"`
 	CandidateID uuid.UUID    `db:"candidate_id"` // stored — hidden from expert view in DTO
 	ExpertID    *uuid.UUID   `db:"expert_id"`    // system-assigned; nil until assigned
 	Reason      string       `db:"reason"`
