@@ -25,15 +25,6 @@ const (
 	GenderFemale Gender = "female"
 )
 
-type BookingStatus string
-
-const (
-	BookingPendingVerification BookingStatus = "pending_verification"
-	BookingVerified            BookingStatus = "verified"
-	BookingRejected            BookingStatus = "rejected"
-	BookingScheduled           BookingStatus = "scheduled"
-)
-
 type SessionStatus string
 
 const (
