@@ -6,19 +6,19 @@ import (
 )
 
 type Config struct {
-	Port string
-	DatabaseURL string 
-	JWTSecret string 
+	Port           string
+	DatabaseURL    string
+	JWTSecret      string
 	InternalAPIKey string
-	BaseURL string
+	BaseURL        string
 
 	SuperAdminName     string
 	SuperAdminEmail    string
 	SuperAdminPassword string
 
-	UploadsDir       string
-	MediaMaxSizeMB   int64
-	FrontendBaseURL string
+	UploadsDir         string
+	MediaMaxSizeMB     int64
+	FrontendBaseURL    string
 	ChapaSecretKey     string
 	ChapaWebhookSecret string
 	ChapaBaseURL       string
@@ -43,19 +43,19 @@ func Load() Config {
 		SuperAdminEmail:    getEnv("SUPER_ADMIN_EMAIL", "root@adlts.et"),
 		SuperAdminPassword: getEnv("SUPER_ADMIN_PASSWORD", "SuperSecure123!"),
 
-		UploadsDir:       getEnv("UPLOADS_DIR", "../uploads"),
-		MediaMaxSizeMB:   getEnvInt64("MEDIA_MAX_SIZE_MB", 5),
-		FrontendBaseURL:  getEnv("FRONTEND_BASE_URL", "http://localhost:3000"),
+		UploadsDir:         getEnv("UPLOADS_DIR", "../uploads"),
+		MediaMaxSizeMB:     getEnvInt64("MEDIA_MAX_SIZE_MB", 5),
+		FrontendBaseURL:    getEnv("FRONTEND_BASE_URL", "http://localhost:3000"),
 		ChapaSecretKey:     getEnv("CHAPA_SECRET_KEY", ""),
 		ChapaWebhookSecret: getEnv("CHAPA_WEBHOOK_SECRET", ""),
 		ChapaBaseURL:       getEnv("CHAPA_BASE_URL", "https://api.chapa.co/v1"),
 
-		SMTPHost:       getEnv("SMTP_HOST", "smtp.gmail.com"),
-		SMTPPort:       getEnv("SMTP_PORT", "587"),
-		SMTPUser:       getEnv("SMTP_USER", ""),
-		SMTPPassword:   getEnv("SMTP_PASSWORD", ""),
-		SMTPFrom:       getEnv("SMTP_FROM", ""),
-		SMTPFromName:   getEnv("SMTP_FROM_NAME", "ADLTS"),
+		SMTPHost:     getEnv("SMTP_HOST", "smtp.gmail.com"),
+		SMTPPort:     getEnv("SMTP_PORT", "587"),
+		SMTPUser:     getEnv("SMTP_USER", ""),
+		SMTPPassword: getEnv("SMTP_PASSWORD", ""),
+		SMTPFrom:     getEnv("SMTP_FROM", ""),
+		SMTPFromName: getEnv("SMTP_FROM_NAME", "ADLTS"),
 	}
 }
 

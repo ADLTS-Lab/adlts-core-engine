@@ -8,6 +8,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"time"
 )
@@ -65,6 +66,10 @@ func (c *ChapaProvider) InitiatePayment(ctx context.Context, req PaymentInitRequ
 		return PaymentInitResult{}, fmt.Errorf("chapa: init http call: %w", err)
 	}
 	defer resp.Body.Close()
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		b, _ := io.ReadAll(resp.Body)
+		return PaymentInitResult{}, fmt.Errorf("chapa: init http status %d: %s", resp.StatusCode, string(b))
+	}
 
 	var chapaResp struct {
 		Status  string `json:"status"`
@@ -78,6 +83,9 @@ func (c *ChapaProvider) InitiatePayment(ctx context.Context, req PaymentInitRequ
 	}
 	if chapaResp.Status != "success" {
 		return PaymentInitResult{}, fmt.Errorf("chapa: init failed: %s", chapaResp.Message)
+	}
+	if chapaResp.Data.CheckoutURL == "" {
+		return PaymentInitResult{}, fmt.Errorf("chapa: init failed: missing checkout_url")
 	}
 
 	return PaymentInitResult{CheckoutURL: chapaResp.Data.CheckoutURL, TxRef: req.TxRef}, nil
@@ -97,10 +105,15 @@ func (c *ChapaProvider) VerifyTransaction(ctx context.Context, txRef string) (Pa
 		return PaymentVerifyResult{}, fmt.Errorf("chapa: verify http call: %w", err)
 	}
 	defer resp.Body.Close()
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		b, _ := io.ReadAll(resp.Body)
+		return PaymentVerifyResult{}, fmt.Errorf("chapa: verify http status %d: %s", resp.StatusCode, string(b))
+	}
 
 	var chapaResp struct {
-		Status string `json:"status"`
-		Data   struct {
+		Status  string `json:"status"`
+		Message string `json:"message"`
+		Data    struct {
 			Status string  `json:"status"`
 			TxRef  string  `json:"tx_ref"`
 			Amount float64 `json:"amount"`
@@ -108,6 +121,12 @@ func (c *ChapaProvider) VerifyTransaction(ctx context.Context, txRef string) (Pa
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&chapaResp); err != nil {
 		return PaymentVerifyResult{}, fmt.Errorf("chapa: decode verify response: %w", err)
+	}
+	if chapaResp.Status != "success" {
+		return PaymentVerifyResult{}, fmt.Errorf("chapa: verify failed: %s", chapaResp.Message)
+	}
+	if chapaResp.Data.TxRef == "" {
+		return PaymentVerifyResult{}, fmt.Errorf("chapa: verify failed: missing tx_ref")
 	}
 
 	return PaymentVerifyResult{

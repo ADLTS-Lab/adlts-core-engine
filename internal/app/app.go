@@ -28,7 +28,7 @@ func Build(cfg config.Config, db *pgxpool.Pool, logger *slog.Logger) *http.Serve
 	identity.BaseURL = cfg.BaseURL
 
 	identitySvc := identity.NewService(identity.NewRepository(db), tokens, mail)
-	
+
 	// Seed root super-admin gracefully
 	if err := identitySvc.SeedSuperAdmin(context.Background(), cfg.SuperAdminName, cfg.SuperAdminEmail, cfg.SuperAdminPassword); err != nil {
 		logger.Error("failed to seed super admin", "error", err)

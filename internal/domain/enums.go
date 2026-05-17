@@ -60,5 +60,5 @@ type DeviceStatus string
 const (
 	DeviceOnline    DeviceStatus = "online"
 	DeviceOffline   DeviceStatus = "offline"
-	DeviceStreaming  DeviceStatus = "streaming"
+	DeviceStreaming DeviceStatus = "streaming"
 )

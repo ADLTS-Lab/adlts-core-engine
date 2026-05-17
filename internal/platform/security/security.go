@@ -18,11 +18,11 @@ import (
 type EntityType string
 
 const (
-	EntityCandidate         EntityType = "candidate"
-	EntityExpert            EntityType = "expert"
-	EntityAdmin             EntityType = "admin"
-	EntitySuperAdmin        EntityType = "super_admin"
-	EntityInstitute         EntityType = "institute"
+	EntityCandidate          EntityType = "candidate"
+	EntityExpert             EntityType = "expert"
+	EntityAdmin              EntityType = "admin"
+	EntitySuperAdmin         EntityType = "super_admin"
+	EntityInstitute          EntityType = "institute"
 	EntityTransportAuthority EntityType = "transport_authority"
 )
 
