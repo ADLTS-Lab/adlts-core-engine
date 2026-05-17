@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"time"
 
+	"adlts/internal/booking"
 	"adlts/internal/identity"
 	"adlts/internal/platform/config"
 	"adlts/internal/platform/mailer"
@@ -24,6 +25,7 @@ func Build(cfg config.Config, db *pgxpool.Pool, logger *slog.Logger) *http.Serve
 
 	tokens := security.NewManager(cfg.JWTSecret)
 	mail := mailer.New(cfg.SMTPHost, cfg.SMTPPort, cfg.SMTPUser, cfg.SMTPPassword, cfg.SMTPFrom, cfg.SMTPFromName)
+	identity.BaseURL = cfg.BaseURL
 
 	identitySvc := identity.NewService(identity.NewRepository(db), tokens, mail)
 	
@@ -33,6 +35,14 @@ func Build(cfg config.Config, db *pgxpool.Pool, logger *slog.Logger) *http.Serve
 	}
 
 	identityHandler := identity.NewHandler(identitySvc, tokens)
+	bookingSvc := booking.NewService(
+		booking.NewRepository(db),
+		booking.NewChapaProvider(cfg.ChapaSecretKey, cfg.ChapaWebhookSecret, cfg.ChapaBaseURL),
+		mail,
+		cfg.BaseURL,
+		cfg.FrontendBaseURL,
+	)
+	bookingHandler := booking.NewHandler(bookingSvc, tokens)
 
 	// TODO: bookingHandler  := booking.NewHandler(booking.NewService(booking.NewRepository(db)), tokens)
 	// TODO: sessionHandler  := session.NewHandler(...)
@@ -61,7 +71,7 @@ func Build(cfg config.Config, db *pgxpool.Pool, logger *slog.Logger) *http.Serve
 
 	r.Route("/api/v1", func(api chi.Router) {
 		identityHandler.Mount(api)
-		// bookingHandler.Mount(api)
+		bookingHandler.Mount(api)
 		// sessionHandler.Mount(api)
 		// iotHandler.Mount(api)
 		// scoringHandler.Mount(api)
