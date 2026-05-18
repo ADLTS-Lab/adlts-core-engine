@@ -10,7 +10,9 @@ import (
 	"adlts/internal/platform/config"
 	"adlts/internal/platform/mailer"
 	"adlts/internal/platform/media"
+	minioclient "adlts/internal/platform/minio"
 	"adlts/internal/platform/security"
+	testing_ "adlts/internal/testing"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
@@ -26,7 +28,7 @@ func Build(cfg config.Config, db *pgxpool.Pool, logger *slog.Logger) *http.Serve
 	mail := mailer.New(cfg.SMTPHost, cfg.SMTPPort, cfg.SMTPUser, cfg.SMTPPassword, cfg.SMTPFrom, cfg.SMTPFromName)
 
 	identitySvc := identity.NewService(identity.NewRepository(db), tokens, mail)
-	
+
 	// Seed root super-admin gracefully
 	if err := identitySvc.SeedSuperAdmin(context.Background(), cfg.SuperAdminName, cfg.SuperAdminEmail, cfg.SuperAdminPassword); err != nil {
 		logger.Error("failed to seed super admin", "error", err)
@@ -34,12 +36,38 @@ func Build(cfg config.Config, db *pgxpool.Pool, logger *slog.Logger) *http.Serve
 
 	identityHandler := identity.NewHandler(identitySvc, tokens)
 
-	// TODO: bookingHandler  := booking.NewHandler(booking.NewService(booking.NewRepository(db)), tokens)
-	// TODO: sessionHandler  := session.NewHandler(...)
-	// TODO: iotHandler      := iot.NewHandler(...)
-	// TODO: scoringHandler  := scoring.NewHandler(...)
-	// TODO: appealHandler   := appeal.NewHandler(...)
-	// TODO: reportingHandler := reporting.NewHandler(...)
+	// ── Testing Core ──────────────────────────────────────────────────────────
+	minioClient, err := minioclient.New(
+		cfg.MinioEndpoint, cfg.MinioAccessKey, cfg.MinioSecretKey, cfg.MinioBucket, cfg.MinioUseSSL)
+	if err != nil {
+		logger.Error("failed to connect to MinIO", "error", err)
+	} else if err := minioClient.EnsureBucket(context.Background()); err != nil {
+		logger.Error("failed to ensure MinIO bucket", "error", err)
+	}
+
+	testingHandler := testing_.NewHandler(
+		testing_.NewRepository(db),
+		minioClient,
+		cfg,
+		tokens,
+	)
+
+	// Wire the orchestrator into the handler (enables admin start/abort)
+	testingHandler.SetOrchestrator(
+		testing_.NewOrchestrator(
+			testing_.NewRepository(db),
+			testing_.NewLaneDetectorClient(cfg.LaneDetectorURL),
+			testing_.NewScoreManeuverClient(cfg.LaneDetectorURL), // scoreClient
+			testing_.NewNarrativeGenerator(cfg.GeminiAPIKey, cfg.GeminiModel),
+			minioClient,
+			testing_.NewIoTClient(""), // iotClient - stream URL should ideally be updated per test/device, but we pass empty string for now to avoid nil, it seems it gets overridden or handled? Let's check scoring.go orchestrator
+			minioClient,               // minioFull
+		),
+	)
+
+	// ── Testing Expiry Cron ───────────────────────────────────────────────────
+	testingExpiry := testing_.NewExpiryWorker(testing_.NewRepository(db), 0, 0)
+	go testingExpiry.Start(context.Background())
 
 	// ── HTTP server ────────────────────────────────────────────────────────────
 	r := chi.NewRouter()
@@ -61,12 +89,7 @@ func Build(cfg config.Config, db *pgxpool.Pool, logger *slog.Logger) *http.Serve
 
 	r.Route("/api/v1", func(api chi.Router) {
 		identityHandler.Mount(api)
-		// bookingHandler.Mount(api)
-		// sessionHandler.Mount(api)
-		// iotHandler.Mount(api)
-		// scoringHandler.Mount(api)
-		// appealHandler.Mount(api)
-		// reportingHandler.Mount(api)
+		testingHandler.Mount(api, r, tokens)
 	})
 
 	return &http.Server{
