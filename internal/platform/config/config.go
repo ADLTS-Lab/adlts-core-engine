@@ -11,6 +11,14 @@ type Config struct {
 	JWTSecret string 
 	InternalAPIKey string
 
+	TestingCoreBaseURL string
+	TestingCoreToken string
+	IdentityBaseURL string
+	IdentityToken string
+	AnthropicAPIKey string
+	AnthropicModel string
+	ReportOutputDir string
+
 	SuperAdminName     string
 	SuperAdminEmail    string
 	SuperAdminPassword string
@@ -32,6 +40,13 @@ func Load() Config {
 		DatabaseURL:    getEnv("DATABASE_URL", ""),
 		JWTSecret:      getEnv("JWT_SECRET", ""),
 		InternalAPIKey: getEnv("INTERNAL_API_KEY", ""),
+		TestingCoreBaseURL: getEnv("TESTING_CORE_BASE_URL", "https://api.adlts.et/api/v1"),
+		TestingCoreToken: getEnv("TESTING_CORE_TOKEN", ""),
+		IdentityBaseURL: getEnv("IDENTITY_BASE_URL", "https://api.adlts.et/api/v1"),
+		IdentityToken: getEnv("IDENTITY_TOKEN", ""),
+		AnthropicAPIKey: getEnv("ANTHROPIC_API_KEY", ""),
+		AnthropicModel: getEnv("ANTHROPIC_MODEL", "claude-3-5-sonnet-latest"),
+		ReportOutputDir: getEnv("REPORT_OUTPUT_DIR", "../generated-reports"),
 
 		SuperAdminName:     getEnv("SUPER_ADMIN_NAME", "Root Admin"),
 		SuperAdminEmail:    getEnv("SUPER_ADMIN_EMAIL", "root@adlts.et"),

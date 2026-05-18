@@ -1,0 +1,219 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>ADLTS Report</title>
+  <style>
+    :root {
+      --bg: #f4f7fb;
+      --paper: #ffffff;
+      --text: #132238;
+      --muted: #5f6b7a;
+      --line: #d9e1ec;
+      --brand: #0f4c81;
+      --good: #17803d;
+      --bad: #b42318;
+      --soft: #edf3f9;
+    }
+    @page { size: A4; margin: 0.5in; }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: Inter, Arial, Helvetica, sans-serif;
+      color: var(--text);
+      background: var(--bg);
+    }
+    .sheet {
+      background: var(--paper);
+      border: 1px solid var(--line);
+      border-radius: 16px;
+      padding: 28px;
+    }
+    .header {
+      display: flex;
+      justify-content: space-between;
+      gap: 24px;
+      border-bottom: 2px solid var(--line);
+      padding-bottom: 18px;
+      margin-bottom: 20px;
+    }
+    .brand {
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+    }
+    .brand h1 { margin: 0; font-size: 26px; color: var(--brand); }
+    .brand p { margin: 0; color: var(--muted); font-size: 13px; }
+    .badge {
+      align-self: flex-start;
+      padding: 10px 14px;
+      border-radius: 999px;
+      color: #fff;
+      font-weight: 700;
+      font-size: 12px;
+      letter-spacing: 0.04em;
+      text-transform: uppercase;
+    }
+    .pass { background: var(--good); }
+    .fail { background: var(--bad); }
+    .grid {
+      display: grid;
+      grid-template-columns: 1.2fr 0.8fr;
+      gap: 18px;
+      margin-bottom: 18px;
+    }
+    .card {
+      border: 1px solid var(--line);
+      border-radius: 14px;
+      padding: 16px;
+      background: linear-gradient(180deg, #fff, #fbfcfe);
+    }
+    .card h2, .section h2 { margin: 0 0 10px; font-size: 16px; }
+    .meta {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 10px 18px;
+    }
+    .meta div { padding: 8px 10px; background: var(--soft); border-radius: 10px; }
+    .meta span { display: block; color: var(--muted); font-size: 11px; text-transform: uppercase; letter-spacing: .04em; }
+    .meta strong { font-size: 14px; }
+    .score-box {
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+      align-items: center;
+      min-height: 150px;
+      text-align: center;
+      background: radial-gradient(circle at top, #eef6ff, #ffffff 62%);
+      border: 1px solid var(--line);
+      border-radius: 14px;
+    }
+    .score { font-size: 42px; font-weight: 800; color: var(--brand); line-height: 1; }
+    .score small { font-size: 16px; color: var(--muted); }
+    .section { margin-top: 16px; }
+    .narrative {
+      line-height: 1.7;
+      color: #243447;
+      font-size: 14px;
+    }
+    ul { margin: 10px 0 0 20px; padding: 0; }
+    li { margin: 6px 0; }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      margin-top: 10px;
+      font-size: 13px;
+    }
+    th, td {
+      border: 1px solid var(--line);
+      padding: 10px 8px;
+      vertical-align: top;
+      text-align: left;
+    }
+    th { background: #f4f8fc; }
+    .footer {
+      margin-top: 18px;
+      padding-top: 12px;
+      border-top: 1px solid var(--line);
+      color: var(--muted);
+      font-size: 12px;
+      display: flex;
+      justify-content: space-between;
+    }
+    .page-break { page-break-before: always; }
+  </style>
+</head>
+<body>
+  <div class="sheet">
+    <div class="header">
+      <div class="brand">
+        <h1>ADLTS Reporting</h1>
+        <p>Automated Driving License Testing System</p>
+        <p>Generated: {{.GeneratedAt.Format "2006-01-02 15:04 MST"}}</p>
+      </div>
+      <div class="badge {{if .Result.Passed}}pass{{else}}fail{{end}}">{{if .Result.Passed}}Passed{{else}}Failed{{end}}</div>
+    </div>
+
+    <div class="grid">
+      <div class="card">
+        <h2>Candidate and Test Information</h2>
+        <div class="meta">
+          <div><span>Candidate</span><strong>{{.Candidate.FirstName}} {{.Candidate.MiddleName}} {{.Candidate.LastName}}</strong></div>
+          <div><span>Email</span><strong>{{.Candidate.Email}}</strong></div>
+          <div><span>Test ID</span><strong>{{.Test.ID}}</strong></div>
+          <div><span>Test Level</span><strong>{{.Test.TestLevelCode}}</strong></div>
+        </div>
+      </div>
+      <div class="score-box">
+        <div class="score">{{printf "%.1f" .Result.WeightedTotalScore}}<small>%</small></div>
+        <div style="margin-top:8px;color:var(--muted)">Pass threshold: {{printf "%.1f" .Result.PassThreshold}}%</div>
+      </div>
+    </div>
+
+    <div class="section card">
+      <h2>Overall Narrative</h2>
+      <div class="narrative">{{.Narrative.OverallNarrative}}</div>
+    </div>
+
+    <div class="section card">
+      <h2>Strengths</h2>
+      <div class="narrative">{{.Narrative.StrengthsNarrative}}</div>
+      <ul>
+        {{range .Analytics.Strengths}}<li>{{.}}</li>{{end}}
+      </ul>
+    </div>
+
+    <div class="section card">
+      <h2>Weaknesses</h2>
+      <div class="narrative">{{.Narrative.WeaknessesNarrative}}</div>
+      <ul>
+        {{range .Analytics.Weaknesses}}<li>{{.}}</li>{{end}}
+      </ul>
+    </div>
+
+    <div class="section card">
+      <h2>Recommendations</h2>
+      <div class="narrative">{{.Narrative.RecommendedFocus}}</div>
+      <ul>
+        {{range .Analytics.Recommendations}}<li>{{.}}</li>{{end}}
+      </ul>
+    </div>
+
+    <div class="section card page-break">
+      <h2>Maneuver Score Table</h2>
+      <table>
+        <thead>
+          <tr>
+            <th>Maneuver</th>
+            <th>Type</th>
+            <th>Score</th>
+            <th>Passed</th>
+            <th>Critical Fail</th>
+            <th>Weakest Phase</th>
+            <th>Mean Center Offset (px)</th>
+          </tr>
+        </thead>
+        <tbody>
+          {{range .Analytics.ManeuverSummaries}}
+          <tr>
+            <td>{{.DisplayName}}</td>
+            <td>{{.ManeuverType}}</td>
+            <td>{{printf "%.1f" .Score}}</td>
+            <td>{{if .Passed}}Yes{{else}}No{{end}}</td>
+            <td>{{if .CriticalFail}}Yes{{else}}No{{end}}</td>
+            <td>{{.WeakestPhase}}</td>
+            <td>{{printf "%.1f" .MeanCenterOffsetPx}}</td>
+          </tr>
+          {{end}}
+        </tbody>
+      </table>
+    </div>
+
+    <div class="footer">
+      <span>ADLTS Reporting Service</span>
+      <span>Test ID: {{.Test.ID}}</span>
+    </div>
+  </div>
+</body>
+</html>
