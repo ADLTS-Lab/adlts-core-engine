@@ -30,6 +30,10 @@ The API listens on `PORT` and defaults to `8080`.
 | `SUPER_ADMIN_PASSWORD` | No | Seeded root super-admin password |
 | `UPLOADS_DIR` | No | Base directory for uploaded media, default `../uploads` |
 | `MEDIA_MAX_SIZE_MB` | No | Maximum upload size, default `5` |
+| `FRONTEND_BASE_URL` | No | Frontend base URL for payment return links |
+| `CHAPA_SECRET_KEY` | No | Chapa API secret key |
+| `CHAPA_WEBHOOK_SECRET` | No | Chapa webhook signature secret |
+| `CHAPA_BASE_URL` | No | Chapa API base URL, default `https://api.chapa.co/v1` |
 | `SMTP_HOST` | No | SMTP server host |
 | `SMTP_PORT` | No | SMTP server port, default `587` |
 | `SMTP_USER` | No | SMTP username |
@@ -75,6 +79,16 @@ Versioned API root: `/api/v1`
 - `invitations`: create, list, retrieve, resend, and cancel
 
 At present, `internal/identity` is the only mounted API module. The remaining domains in `internal/` are scaffolded for later modules.
+## Payment Gateway
+
+Provider: Chapa (https://chapa.co) via hosted checkout.
+
+Chapa supports Telebirr, CBE Birr, Amole, Visa/Mastercard, and bank transfers on their hosted page. This backend only uses:
+
+1. `POST /transaction/initialize` to get a checkout URL
+2. `GET /transaction/verify/{tx_ref}` to confirm payment status
+
+Known limitations (out of scope for v1): direct integrations with Telebirr, CBE Birr, Awash, Dashen/Amole, or Stripe.
 
 ## Architectural Organization
 

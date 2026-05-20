@@ -25,6 +25,10 @@ type Config struct {
 
 	UploadsDir     string
 	MediaMaxSizeMB int64
+	FrontendBaseURL    string
+	ChapaSecretKey     string
+	ChapaWebhookSecret string
+	ChapaBaseURL       string
 
 	SMTPHost     string
 	SMTPPort     string
@@ -69,6 +73,10 @@ func Load() Config {
 
 		UploadsDir:     getEnv("UPLOADS_DIR", "../uploads"),
 		MediaMaxSizeMB: getEnvInt64("MEDIA_MAX_SIZE_MB", 5),
+		FrontendBaseURL:    getEnv("FRONTEND_BASE_URL", "http://localhost:3000"),
+		ChapaSecretKey:     getEnv("CHAPA_SECRET_KEY", ""),
+		ChapaWebhookSecret: getEnv("CHAPA_WEBHOOK_SECRET", ""),
+		ChapaBaseURL:       getEnv("CHAPA_BASE_URL", "https://api.chapa.co/v1"),
 
 		SMTPHost:     getEnv("SMTP_HOST", "smtp.gmail.com"),
 		SMTPPort:     getEnv("SMTP_PORT", "587"),
