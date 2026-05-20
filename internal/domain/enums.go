@@ -34,18 +34,6 @@ const (
 	BookingScheduled           BookingStatus = "scheduled"
 )
 
-type SessionStatus string
-
-const (
-	SessionScheduled      SessionStatus = "scheduled"
-	SessionInitiating     SessionStatus = "initiating"
-	SessionActive         SessionStatus = "active"
-	SessionCompleted      SessionStatus = "completed"
-	SessionReviewRequired SessionStatus = "review_required"
-	SessionFinalized      SessionStatus = "finalized"
-	SessionAborted        SessionStatus = "aborted"
-)
-
 type AppealStatus string
 
 const (
@@ -54,20 +42,4 @@ const (
 	AppealRejected AppealStatus = "rejected"
 )
 
-type DeviceCommand string
-
-const (
-	CmdHealth        DeviceCommand = "health"
-	CmdHealthDetails DeviceCommand = "health-details"
-	CmdStartTest     DeviceCommand = "start-test"
-	CmdEndTest       DeviceCommand = "end-test"
-	CmdAbort         DeviceCommand = "abort"
-)
-
-type DeviceStatus string
-
-const (
-	DeviceOnline    DeviceStatus = "online"
-	DeviceOffline   DeviceStatus = "offline"
-	DeviceStreaming  DeviceStatus = "streaming"
-)
+// DeviceStatus, DeviceCommand, and SessionStatus (testing core) are in testing.go.

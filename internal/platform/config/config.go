@@ -6,17 +6,17 @@ import (
 )
 
 type Config struct {
-	Port string
-	DatabaseURL string 
-	JWTSecret string 
+	Port           string
+	DatabaseURL    string
+	JWTSecret      string
 	InternalAPIKey string
 
 	SuperAdminName     string
 	SuperAdminEmail    string
 	SuperAdminPassword string
 
-	UploadsDir       string
-	MediaMaxSizeMB   int64
+	UploadsDir     string
+	MediaMaxSizeMB int64
 
 	SMTPHost     string
 	SMTPPort     string
@@ -24,6 +24,21 @@ type Config struct {
 	SMTPPassword string
 	SMTPFrom     string
 	SMTPFromName string
+
+	// ── Testing Core ─────────────────────────────────────────────────────────
+	MinioEndpoint  string
+	MinioAccessKey string
+	MinioSecretKey string
+	MinioBucket    string
+	MinioUseSSL    bool
+
+	LaneDetectorURL string
+
+	GeminiAPIKey string
+	GeminiModel  string
+
+	BookingWindowHours         int // ±window for device checkin vs scheduled_at
+	InstituteResultDelayHours  int // delay before institute can see result
 }
 
 func Load() Config {
@@ -40,12 +55,27 @@ func Load() Config {
 		UploadsDir:     getEnv("UPLOADS_DIR", "../uploads"),
 		MediaMaxSizeMB: getEnvInt64("MEDIA_MAX_SIZE_MB", 5),
 
-		SMTPHost:       getEnv("SMTP_HOST", "smtp.gmail.com"),
-		SMTPPort:       getEnv("SMTP_PORT", "587"),
-		SMTPUser:       getEnv("SMTP_USER", ""),
-		SMTPPassword:   getEnv("SMTP_PASSWORD", ""),
-		SMTPFrom:       getEnv("SMTP_FROM", ""),
-		SMTPFromName:   getEnv("SMTP_FROM_NAME", "ADLTS"),
+		SMTPHost:     getEnv("SMTP_HOST", "smtp.gmail.com"),
+		SMTPPort:     getEnv("SMTP_PORT", "587"),
+		SMTPUser:     getEnv("SMTP_USER", ""),
+		SMTPPassword: getEnv("SMTP_PASSWORD", ""),
+		SMTPFrom:     getEnv("SMTP_FROM", ""),
+		SMTPFromName: getEnv("SMTP_FROM_NAME", "ADLTS"),
+
+		// Testing Core
+		MinioEndpoint:  getEnv("MINIO_ENDPOINT", "localhost:9000"),
+		MinioAccessKey: getEnv("MINIO_ACCESS_KEY", "minioadmin"),
+		MinioSecretKey: getEnv("MINIO_SECRET_KEY", "minioadmin"),
+		MinioBucket:    getEnv("MINIO_BUCKET", "adlts"),
+		MinioUseSSL:    getEnv("MINIO_USE_SSL", "false") == "true",
+
+		LaneDetectorURL: getEnv("LANE_DETECTOR_URL", "http://localhost:8001"),
+
+		GeminiAPIKey: getEnv("GEMINI_API_KEY", ""),
+		GeminiModel:  getEnv("GEMINI_MODEL", "gemini-1.5-flash"),
+
+		BookingWindowHours:        getEnvInt("BOOKING_WINDOW_HOURS", 2),
+		InstituteResultDelayHours: getEnvInt("INSTITUTE_RESULT_DELAY_HOURS", 0),
 	}
 }
 
@@ -63,4 +93,8 @@ func getEnvInt64(key string, fallback int64) int64 {
 		}
 	}
 	return fallback
+}
+
+func getEnvInt(key string, fallback int) int {
+	return int(getEnvInt64(key, int64(fallback)))
 }

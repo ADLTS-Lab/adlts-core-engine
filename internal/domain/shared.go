@@ -1,10 +1,16 @@
 package domain
 
 import (
+	"encoding/json"
 	"time"
 
 	"github.com/google/uuid"
 )
+
+// JSONB maps to PostgreSQL's JSONB column type.
+// pgx v5 can scan JSONB natively into json.RawMessage ([]byte).
+// A nil value represents a NULL column.
+type JSONB = json.RawMessage
 
 type Audit struct {
 	CreatedAt time.Time `db:"created_at"`
