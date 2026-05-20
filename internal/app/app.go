@@ -35,7 +35,14 @@ func Build(cfg config.Config, db *pgxpool.Pool, logger *slog.Logger) *http.Serve
 	}
 
 	identityHandler := identity.NewHandler(identitySvc, tokens)
-
+	appealRepo := appeal.NewRepository(db)
+	appealSvc := appeal.NewService(appealRepo, db)
+	appealHandler := appeal.NewHandler(appealSvc)
+	// Recording (playback-only) handler
+	recordingRepo := recording.NewRepository(db)
+	minioClient, _ := recording.NewMinioClientFromEnv()
+	recordingSvc := recording.NewService(recordingRepo, minioClient)
+	recordingHandler := recording.NewHandler(recordingSvc)
 	// ── Testing Core ──────────────────────────────────────────────────────────
 	minioClient, err := minioclient.New(
 		cfg.MinioEndpoint, cfg.MinioAccessKey, cfg.MinioSecretKey, cfg.MinioBucket, cfg.MinioUseSSL)
@@ -90,6 +97,8 @@ func Build(cfg config.Config, db *pgxpool.Pool, logger *slog.Logger) *http.Serve
 	r.Route("/api/v1", func(api chi.Router) {
 		identityHandler.Mount(api)
 		testingHandler.Mount(api, r, tokens)
+		appealHandler.Mount(api)
+		recordingHandler.Mount(api)
 	})
 
 	return &http.Server{

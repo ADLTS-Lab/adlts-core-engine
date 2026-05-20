@@ -20,25 +20,19 @@ const (
 	SessionAborted        SessionStatus = "aborted"
 )
 
-// the old monolith. They reference the old `sessions` table which has been
-// superseded by the Testing Core module (tests, test_sessions, frame_analyses).
-//
-// The appeals team may reference Session for backward compat with the existing
-// `appeals` table. New testing core code uses domain.Test and domain.TestSession.
-
 type Session struct {
-	ID               uuid.UUID     `db:"id"`
-	BookingID        uuid.UUID     `db:"booking_id"`
-	CandidateID      uuid.UUID     `db:"candidate_id"`
-	TestCenterID     uuid.UUID     `db:"test_center_id"`
-	DeviceID         *uuid.UUID    `db:"device_id"`
-	Status           SessionStatus `db:"status"`
-	Score            float64       `db:"score"`
-	RecordingURL     string        `db:"recording_url"`
-	ResultOverlayURL string        `db:"result_overlay_url"`
-	StartedAt        *time.Time    `db:"started_at"`
-	CompletedAt      *time.Time    `db:"completed_at"`
-	FinalizedAt      *time.Time    `db:"finalized_at"`
+	ID               uuid.UUID       `db:"id"`
+	BookingID        uuid.UUID       `db:"booking_id"`
+	CandidateID      uuid.UUID       `db:"candidate_id"`
+	TestCenterID     uuid.UUID       `db:"test_center_id"` // non-nullable — sessions belong to a center
+	DeviceID         *uuid.UUID      `db:"device_id"`
+	Status           SessionStatus   `db:"status"`
+	Score            float64         `db:"score"`
+	RecordingURL     string          `db:"recording_url"`
+	ResultOverlayURL string          `db:"result_overlay_url"`
+	StartedAt        *time.Time      `db:"started_at"`
+	CompletedAt      *time.Time      `db:"completed_at"`
+	FinalizedAt      *time.Time      `db:"finalized_at"`
 	Audit
 }
 
@@ -55,7 +49,7 @@ type Violation struct {
 	SessionID  uuid.UUID `db:"session_id"`
 	Code       string    `db:"code"`
 	Message    string    `db:"message"`
-	Severity   string    `db:"severity"`
+	Severity   string    `db:"severity"` // "minor", "major", "critical"
 	FrameIndex int       `db:"frame_index"`
 	CreatedAt  time.Time `db:"created_at"`
 }
