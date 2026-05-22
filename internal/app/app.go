@@ -13,6 +13,7 @@ import (
 	"adlts/internal/platform/media"
 	"adlts/internal/platform/security"
 	"adlts/internal/recording"
+	"adlts/internal/reporting"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
@@ -35,21 +36,33 @@ func Build(cfg config.Config, db *pgxpool.Pool, logger *slog.Logger) *http.Serve
 	}
 
 	identityHandler := identity.NewHandler(identitySvc, tokens)
-
 	// TODO: bookingHandler  := booking.NewHandler(booking.NewService(booking.NewRepository(db)), tokens)
 	// TODO: sessionHandler  := session.NewHandler(...)
 	// TODO: iotHandler      := iot.NewHandler(...)
 	// TODO: scoringHandler  := scoring.NewHandler(...)
-	// Appeal handler
+
 	appealRepo := appeal.NewRepository(db)
 	appealSvc := appeal.NewService(appealRepo, db)
 	appealHandler := appeal.NewHandler(appealSvc)
-	// Recording (playback-only) handler
+
 	recordingRepo := recording.NewRepository(db)
 	minioClient, _ := recording.NewMinioClientFromEnv()
 	recordingSvc := recording.NewService(recordingRepo, minioClient)
 	recordingHandler := recording.NewHandler(recordingSvc)
-	// TODO: reportingHandler := reporting.NewHandler(...)
+
+	reportRenderer, err := reporting.NewRenderer()
+	if err != nil {
+		logger.Error("failed to load report template", "error", err)
+	}
+	reportingSvc := reporting.NewService(
+		reporting.NewHTTPTestingCoreClient(cfg.TestingCoreBaseURL, cfg.TestingCoreToken),
+		reporting.NewHTTPIdentityClient(cfg.IdentityBaseURL, cfg.IdentityToken),
+		reporting.NewHTTPAnthropicClient(cfg.AnthropicAPIKey, cfg.AnthropicModel),
+		reportRenderer,
+		cfg.ReportOutputDir,
+		logger,
+	)
+	reportingHandler := reporting.NewHandler(reportingSvc)
 
 	// ── HTTP server ────────────────────────────────────────────────────────────
 	r := chi.NewRouter()
@@ -71,14 +84,25 @@ func Build(cfg config.Config, db *pgxpool.Pool, logger *slog.Logger) *http.Serve
 
 	r.Route("/api/v1", func(api chi.Router) {
 		identityHandler.Mount(api)
-		appealHandler.Mount(api)
-		recordingHandler.Mount(api)
+
+		api.Group(func(r chi.Router) {
+			r.Use(security.Authenticate(tokens))
+			appealHandler.Mount(r)
+			recordingHandler.Mount(r)
+		})
+
+		api.Group(func(r chi.Router) {
+			r.Use(
+				security.Authenticate(tokens),
+				security.RequireEntities(security.EntityAdmin, security.EntitySuperAdmin, security.EntityInstitute, security.EntityExpert),
+			)
+			reportingHandler.Mount(r)
+		})
 		// bookingHandler.Mount(api)
 		// sessionHandler.Mount(api)
 		// iotHandler.Mount(api)
 		// scoringHandler.Mount(api)
 		// appealHandler.Mount(api)
-		// reportingHandler.Mount(api)
 	})
 
 	return &http.Server{
