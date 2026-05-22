@@ -249,6 +249,23 @@ CREATE TABLE IF NOT EXISTS sessions (
     updated_by         UUID NOT NULL
 );
 
+-- ── Tests & results (used by appeals) ───────────────────────────────────────
+
+CREATE TABLE IF NOT EXISTS tests (
+    id                     UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    session_id              UUID REFERENCES sessions(id) ON DELETE SET NULL,
+    appeal_window_closes_at TIMESTAMPTZ NOT NULL,
+    created_at              TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at              TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    created_by              UUID NOT NULL,
+    updated_by              UUID NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS test_results (
+    test_id UUID PRIMARY KEY REFERENCES tests(id) ON DELETE CASCADE,
+    passed  BOOLEAN NOT NULL DEFAULT false
+);
+
 CREATE TABLE IF NOT EXISTS session_telemetry (
     session_id      UUID PRIMARY KEY REFERENCES sessions(id),
     current_score   NUMERIC(5,2) NOT NULL DEFAULT 0,
