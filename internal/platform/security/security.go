@@ -148,7 +148,7 @@ func RequireEntities(allowed ...EntityType) func(http.Handler) http.Handler {
 					return
 				}
 			}
-			httpx.Failure(w, http.StatusForbidden, "FORBIDDEN", "forbidden", nil)
+<<<<<<< HEAD
 		})
 	}
 }
@@ -158,10 +158,11 @@ func RequireInternalToken(expected string) func(http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			if expected == "" {
 				httpx.Failure(w, http.StatusForbidden, "FORBIDDEN", "internal token not configured", nil)
+				http.Error(w, "internal token not configured", http.StatusForbidden)
 				return
 			}
 			if got := r.Header.Get("X-Internal-Token"); got != expected {
-				httpx.Failure(w, http.StatusForbidden, "FORBIDDEN", "invalid internal token", nil)
+				http.Error(w, "invalid internal token", http.StatusForbidden)
 				return
 			}
 			next.ServeHTTP(w, r)

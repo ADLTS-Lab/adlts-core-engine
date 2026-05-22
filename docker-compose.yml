@@ -39,6 +39,14 @@ services:
       CHAPA_SECRET_KEY: ${CHAPA_SECRET_KEY:-CHASECK_test_placeholder}
       CHAPA_WEBHOOK_SECRET: ${CHAPA_WEBHOOK_SECRET:-dev_webhook_secret}
       CHAPA_BASE_URL: ${CHAPA_BASE_URL:-https://api.chapa.co/v1}
+      # Reporting integrations
+      TESTING_CORE_BASE_URL: ${TESTING_CORE_BASE_URL:-https://api.adlts.et/api/v1}
+      TESTING_CORE_TOKEN: ${TESTING_CORE_TOKEN:-}
+      IDENTITY_BASE_URL: ${IDENTITY_BASE_URL:-https://api.adlts.et/api/v1}
+      IDENTITY_TOKEN: ${IDENTITY_TOKEN:-}
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      ANTHROPIC_MODEL: ${ANTHROPIC_MODEL:-claude-3-5-sonnet-latest}
+      REPORT_OUTPUT_DIR: ${REPORT_OUTPUT_DIR:-/generated-reports}
     ports:
       - "8080:8080"
     volumes:
