@@ -1,0 +1,1064 @@
+{
+  "info": {
+    "name": "ADLTS Full E2E Test",
+    "description": "ADLTS API — Full end-to-end walkthrough: Super Admin → Institute → Candidate → Booking → Test → Results",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [],
+  "auth": {
+    "type": "bearer",
+    "bearer": {
+      "token": "{{super_admin_access_token}}"
+    }
+  },
+  "item": [
+    {
+      "name": "1. Auth",
+      "item": [
+        {
+          "name": "Super Admin Login",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "var r = pm.response.json(); pm.environment.set('super_admin_access_token', r.data.access_token); pm.environment.set('super_admin_entity_type', r.data.entity_type);"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/api/v1/auth/login",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "auth",
+                "login"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\"email\": \"root@adlts.et\", \"password\": \"SuperSecure123!\"}"
+            }
+          }
+        },
+        {
+          "name": "Institute Login",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "var r = pm.response.json(); pm.environment.set('institute_access_token', r.data.access_token);"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/api/v1/auth/login",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "auth",
+                "login"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\"email\": \"institute@adlts.et\", \"password\": \"Institute123!\"}"
+            }
+          }
+        },
+        {
+          "name": "Candidate Login",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "var r = pm.response.json(); pm.environment.set('candidate_access_token', r.data.access_token);"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/api/v1/auth/login",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "auth",
+                "login"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\"email\": \"candidate@adlts.et\", \"password\": \"Candidate123!\"}"
+            }
+          }
+        },
+        {
+          "name": "Register Candidate",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Registration sent OTP', function(){ pm.response.to.have.status(201); });"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/api/v1/auth/candidates/register",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "auth",
+                "candidates",
+                "register"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\"first_name\": \"John\", \"middle_name\": \"M.\", \"last_name\": \"Doe\", \"email\": \"candidate@adlts.et\", \"password\": \"Candidate123!\", \"phone\": \"+251922000000\", \"fayida_id\": \"FA-12345\", \"birth_date\": \"1995-06-15T00:00:00Z\", \"gender\": \"male\"}"
+            }
+          }
+        },
+        {
+          "name": "Verify OTP",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/api/v1/auth/candidates/verify-otp",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "auth",
+                "candidates",
+                "verify-otp"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\"email\": \"candidate@adlts.et\", \"code\": \"YOUR_OTP_HERE\"}"
+            }
+          }
+        },
+        {
+          "name": "Accept Invitation",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/api/v1/auth/invitations/accept",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "auth",
+                "invitations",
+                "accept"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\"token\": \"{{invitation_token}}\", \"password\": \"Institute123!\", \"name\": \"Addis Driving Institute\", \"phone\": \"+251911000000\"}"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "2. Identity",
+      "item": [
+        {
+          "name": "List Institutes (as Super Admin)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "var r = pm.response.json(); if(r.data && r.data.length > 0){ pm.environment.set('institute_id', r.data[0].id); }"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "auth": {
+              "type": "bearer",
+              "bearer": {
+                "token": "{{super_admin_access_token}}"
+              }
+            },
+            "url": {
+              "raw": "{{base_url}}/api/v1/institutes",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "institutes"
+              ]
+            }
+          }
+        },
+        {
+          "name": "List Test Level Types",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{base_url}}/api/v1/test-level-types",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "test-level-types"
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "3. Invitations",
+      "item": [
+        {
+          "name": "Invite Institute Admin",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "var r = pm.response.json(); if(r.data){ pm.environment.set('invitation_id', r.data.id); }"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "auth": {
+              "type": "bearer",
+              "bearer": {
+                "token": "{{super_admin_access_token}}"
+              }
+            },
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/api/v1/invitations",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "invitations"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\"email\": \"institute@adlts.et\", \"entity_type\": \"institute\"}"
+            }
+          }
+        },
+        {
+          "name": "List Invitations",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "var r = pm.response.json(); if(r.data){ r.data.forEach(function(inv){ if(inv.id === pm.environment.get('invitation_id')){ pm.environment.set('invitation_token', inv.token); } }); }"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "auth": {
+              "type": "bearer",
+              "bearer": {
+                "token": "{{super_admin_access_token}}"
+              }
+            },
+            "url": {
+              "raw": "{{base_url}}/api/v1/invitations",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "invitations"
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "4. Institutes",
+      "item": [
+        {
+          "name": "List Institutes",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "var r = pm.response.json(); if(r.data && r.data.length > 0){ pm.environment.set('institute_id', r.data[0].id); }"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "auth": {
+              "type": "bearer",
+              "bearer": {
+                "token": "{{super_admin_access_token}}"
+              }
+            },
+            "url": {
+              "raw": "{{base_url}}/api/v1/institutes",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "institutes"
+              ]
+            }
+          }
+        },
+        {
+          "name": "Get Institute Me",
+          "request": {
+            "method": "GET",
+            "auth": {
+              "type": "bearer",
+              "bearer": {
+                "token": "{{institute_access_token}}"
+              }
+            },
+            "url": {
+              "raw": "{{base_url}}/api/v1/institutes/me",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "institutes",
+                "me"
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "5. Test Plans",
+      "item": [
+        {
+          "name": "List Test Plans",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "var r = pm.response.json(); if(r.data && r.data.length > 0){ pm.environment.set('test_plan_id', r.data[0].id); }"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "auth": {
+              "type": "bearer",
+              "bearer": {
+                "token": "{{super_admin_access_token}}"
+              }
+            },
+            "url": {
+              "raw": "{{base_url}}/api/v1/test-plans",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "test-plans"
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "6. Bookings",
+      "item": [
+        {
+          "name": "Create Booking (Candidate)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "var r = pm.response.json(); if(r.data){ pm.environment.set('booking_id', r.data.id); }"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "auth": {
+              "type": "bearer",
+              "bearer": {
+                "token": "{{candidate_access_token}}"
+              }
+            },
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/api/v1/bookings",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "bookings"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\"institute_id\": \"{{institute_id}}\"}"
+            }
+          }
+        },
+        {
+          "name": "Verify Booking (Institute)",
+          "request": {
+            "method": "PATCH",
+            "auth": {
+              "type": "bearer",
+              "bearer": {
+                "token": "{{institute_access_token}}"
+              }
+            },
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/api/v1/bookings/{{booking_id}}/verify",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "bookings",
+                "{{booking_id}}",
+                "verify"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\"action\": \"approve\"}"
+            }
+          }
+        },
+        {
+          "name": "List Bookings",
+          "request": {
+            "method": "GET",
+            "auth": {
+              "type": "bearer",
+              "bearer": {
+                "token": "{{super_admin_access_token}}"
+              }
+            },
+            "url": {
+              "raw": "{{base_url}}/api/v1/bookings",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "bookings"
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "7. Slots",
+      "item": [
+        {
+          "name": "Create Slot (Admin)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "var r = pm.response.json(); if(r.data){ pm.environment.set('slot_id', r.data.id); }"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "auth": {
+              "type": "bearer",
+              "bearer": {
+                "token": "{{super_admin_access_token}}"
+              }
+            },
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/api/v1/slots",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "slots"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\"institute_id\": \"{{institute_id}}\", \"starts_at\": \"2026-06-15T09:00:00Z\", \"ends_at\": \"2026-06-15T10:00:00Z\", \"capacity\": 5}"
+            }
+          }
+        },
+        {
+          "name": "List Slots",
+          "request": {
+            "method": "GET",
+            "auth": {
+              "type": "bearer",
+              "bearer": {
+                "token": "{{super_admin_access_token}}"
+              }
+            },
+            "url": {
+              "raw": "{{base_url}}/api/v1/slots?institute_id={{institute_id}}",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "slots"
+              ],
+              "query": [
+                {
+                  "key": "institute_id",
+                  "value": "{{institute_id}}"
+                }
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "8. Schedule Booking",
+      "item": [
+        {
+          "name": "Schedule Booking (Admin)",
+          "request": {
+            "method": "PATCH",
+            "auth": {
+              "type": "bearer",
+              "bearer": {
+                "token": "{{super_admin_access_token}}"
+              }
+            },
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/api/v1/bookings/{{booking_id}}/schedule",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "bookings",
+                "{{booking_id}}",
+                "schedule"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\"slot_id\": \"{{slot_id}}\"}"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "9. Payment",
+      "item": [
+        {
+          "name": "Initiate Payment (Candidate)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "var r = pm.response.json(); if(r.data){ pm.environment.set('payment_checkout_url', r.data.checkout_url); pm.environment.set('payment_tx_ref', r.data.tx_ref); }"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "auth": {
+              "type": "bearer",
+              "bearer": {
+                "token": "{{candidate_access_token}}"
+              }
+            },
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/api/v1/bookings/{{booking_id}}/payments",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "bookings",
+                "{{booking_id}}",
+                "payments"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\"amount_cents\": 50000, \"currency\": \"ETB\"}"
+            }
+          }
+        },
+        {
+          "name": "List Payments",
+          "request": {
+            "method": "GET",
+            "auth": {
+              "type": "bearer",
+              "bearer": {
+                "token": "{{candidate_access_token}}"
+              }
+            },
+            "url": {
+              "raw": "{{base_url}}/api/v1/bookings/{{booking_id}}/payments",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "bookings",
+                "{{booking_id}}",
+                "payments"
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "10. Tests",
+      "item": [
+        {
+          "name": "List Tests",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "var r = pm.response.json(); if(r.data && r.data.length > 0){ pm.environment.set('test_id', r.data[0].id); }"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "auth": {
+              "type": "bearer",
+              "bearer": {
+                "token": "{{super_admin_access_token}}"
+              }
+            },
+            "url": {
+              "raw": "{{base_url}}/api/v1/tests",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "tests"
+              ]
+            }
+          }
+        },
+        {
+          "name": "Get Test Status",
+          "request": {
+            "method": "GET",
+            "auth": {
+              "type": "bearer",
+              "bearer": {
+                "token": "{{super_admin_access_token}}"
+              }
+            },
+            "url": {
+              "raw": "{{base_url}}/api/v1/tests/{{test_id}}/status",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "tests",
+                "{{test_id}}",
+                "status"
+              ]
+            }
+          }
+        },
+        {
+          "name": "Device Check-in (Candidate)",
+          "request": {
+            "method": "POST",
+            "auth": {
+              "type": "bearer",
+              "bearer": {
+                "token": "{{candidate_access_token}}"
+              }
+            },
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/api/v1/tests/device-checkin",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "tests",
+                "device-checkin"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\"device_code\": \"DEV-001\", \"password\": \"devicepass\", \"test_center_id\": \"00000000-0000-0000-0000-000000000001\"}"
+            }
+          }
+        },
+        {
+          "name": "Start Test (Admin)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "var r = pm.response.json(); if(r.data && r.data.test_id){ pm.environment.set('test_id', r.data.test_id); }"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "auth": {
+              "type": "bearer",
+              "bearer": {
+                "token": "{{super_admin_access_token}}"
+              }
+            },
+            "url": {
+              "raw": "{{base_url}}/api/v1/tests/{{test_id}}/start",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "tests",
+                "{{test_id}}",
+                "start"
+              ]
+            }
+          }
+        },
+        {
+          "name": "Get Test Result",
+          "request": {
+            "method": "GET",
+            "auth": {
+              "type": "bearer",
+              "bearer": {
+                "token": "{{candidate_access_token}}"
+              }
+            },
+            "url": {
+              "raw": "{{base_url}}/api/v1/tests/{{test_id}}/result",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "tests",
+                "{{test_id}}",
+                "result"
+              ]
+            }
+          }
+        },
+        {
+          "name": "Get Test Sessions",
+          "request": {
+            "method": "GET",
+            "auth": {
+              "type": "bearer",
+              "bearer": {
+                "token": "{{super_admin_access_token}}"
+              }
+            },
+            "url": {
+              "raw": "{{base_url}}/api/v1/tests/{{test_id}}/sessions",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "tests",
+                "{{test_id}}",
+                "sessions"
+              ]
+            }
+          }
+        },
+        {
+          "name": "Abort Test (Admin)",
+          "request": {
+            "method": "POST",
+            "auth": {
+              "type": "bearer",
+              "bearer": {
+                "token": "{{super_admin_access_token}}"
+              }
+            },
+            "url": {
+              "raw": "{{base_url}}/api/v1/tests/{{test_id}}/abort",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "tests",
+                "{{test_id}}",
+                "abort"
+              ]
+            }
+          }
+        },
+        {
+          "name": "Monitor Status",
+          "request": {
+            "method": "GET",
+            "auth": {
+              "type": "bearer",
+              "bearer": {
+                "token": "{{super_admin_access_token}}"
+              }
+            },
+            "url": {
+              "raw": "{{base_url}}/api/v1/tests/{{test_id}}/monitor/status",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "tests",
+                "{{test_id}}",
+                "monitor",
+                "status"
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "11. Recordings",
+      "item": [
+        {
+          "name": "Get Recording (Admin)",
+          "request": {
+            "method": "GET",
+            "auth": {
+              "type": "bearer",
+              "bearer": {
+                "token": "{{super_admin_access_token}}"
+              }
+            },
+            "url": {
+              "raw": "{{base_url}}/api/v1/tests/{{test_id}}/recording",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "tests",
+                "{{test_id}}",
+                "recording"
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "12. Health",
+      "item": [
+        {
+          "name": "API Health Check",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{base_url}}/health",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "health"
+              ]
+            }
+          }
+        },
+        {
+          "name": "ADLTS Service Health",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "http://localhost:8002/health",
+              "host": [
+                "http://localhost:8002"
+              ],
+              "path": [
+                "health"
+              ]
+            }
+          }
+        }
+      ]
+    }
+  ]
+}

@@ -57,8 +57,8 @@ func (g *NarrativeGenerator) Generate(ctx context.Context, input *NarrativeInput
 		return g.fallback(input), nil
 	}
 
-	prompt := g.buildPrompt(input)
-	result, err := g.callGemini(ctx, prompt)
+	userPrompt := g.buildPrompt(input)
+	result, err := g.callGemini(ctx, narrativeSystemPrompt, userPrompt)
 	if err != nil {
 		return g.fallback(input), nil
 	}
@@ -74,16 +74,30 @@ func (g *NarrativeGenerator) Generate(ctx context.Context, input *NarrativeInput
 
 // ── Gemini REST API call ─────────────────────────────────────────────────────
 
+// geminiRequest is the full request body sent to the Gemini REST API.
+// Uses system_instruction + JSON response mode for structured output.
 type geminiRequest struct {
-	Contents []geminiContent `json:"contents"`
+	SystemInstruction *geminiSystemInstruction `json:"system_instruction,omitempty"`
+	Contents          []geminiContent          `json:"contents"`
+	GenerationConfig  geminiGenerationConfig   `json:"generationConfig"`
+}
+
+type geminiSystemInstruction struct {
+	Parts []geminiPart `json:"parts"`
 }
 
 type geminiContent struct {
+	Role  string       `json:"role,omitempty"`
 	Parts []geminiPart `json:"parts"`
 }
 
 type geminiPart struct {
 	Text string `json:"text"`
+}
+
+type geminiGenerationConfig struct {
+	Temperature      float64 `json:"temperature"`
+	ResponseMimeType string  `json:"responseMimeType,omitempty"`
 }
 
 type geminiResponse struct {
@@ -94,6 +108,15 @@ type geminiResponse struct {
 	} `json:"candidates"`
 }
 
+const narrativeSystemPrompt = `You are an expert driving instructor producing a structured written assessment of a student's practical driving test for the student to read.
+
+Rules:
+- Use specific, technical driving terminology (e.g. lane centering, steering correction, vehicle positioning, speed modulation, traffic awareness, mirror checks, road positioning, observation).
+- Base all statements strictly on the provided numerical data. Do not invent facts.
+- Be professional, objective, and constructive — this is for the student's learning.
+- Keep overall, strengths, weaknesses at 2-4 sentences. Keep recommended_focus at 3-5 sentences with actionable drills.
+- Return ONLY valid JSON with exactly these 4 keys: overall, strengths, weaknesses, recommended_focus.`
+
 type parsedNarrative struct {
 	Overall          string
 	Strengths        string
@@ -101,14 +124,28 @@ type parsedNarrative struct {
 	RecommendedFocus string
 }
 
-func (g *NarrativeGenerator) callGemini(ctx context.Context, prompt string) (*parsedNarrative, error) {
+func (g *NarrativeGenerator) callGemini(ctx context.Context, systemPrompt, userPrompt string) (*parsedNarrative, error) {
 	url := fmt.Sprintf(
 		"https://generativelanguage.googleapis.com/v1beta/models/%s:generateContent?key=%s",
 		g.model, g.apiKey)
 
-	body, _ := json.Marshal(geminiRequest{
-		Contents: []geminiContent{{Parts: []geminiPart{{Text: prompt}}}},
-	})
+	reqBody := geminiRequest{
+		SystemInstruction: &geminiSystemInstruction{
+			Parts: []geminiPart{{Text: systemPrompt}},
+		},
+		Contents: []geminiContent{
+			{Role: "user", Parts: []geminiPart{{Text: userPrompt}}},
+		},
+		GenerationConfig: geminiGenerationConfig{
+			Temperature:      0.2,
+			ResponseMimeType: "application/json",
+		},
+	}
+	body, err := json.Marshal(reqBody)
+	if err != nil {
+		return nil, err
+	}
+
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(body))
 	if err != nil {
 		return nil, err
@@ -138,40 +175,59 @@ func (g *NarrativeGenerator) callGemini(ctx context.Context, prompt string) (*pa
 
 func (g *NarrativeGenerator) buildPrompt(inp *NarrativeInput) string {
 	var sb strings.Builder
-	sb.WriteString("You are an expert driving instructor analyzing a student's driving test results.\n\n")
 	sb.WriteString(fmt.Sprintf("Test level: %s\n", inp.LevelCode))
-	sb.WriteString(fmt.Sprintf("Overall score: %.1f / 100 (threshold: %.1f)\n", inp.TotalScore, inp.PassThreshold))
+	sb.WriteString(fmt.Sprintf("Overall score: %.1f / 100 (pass threshold: %.1f)\n", inp.TotalScore, inp.PassThreshold))
 	if inp.Passed {
 		sb.WriteString("Result: PASSED\n\n")
 	} else {
 		sb.WriteString("Result: FAILED\n\n")
 	}
-	sb.WriteString("Session breakdown:\n")
+	sb.WriteString("Per-maneuver breakdown with technical metrics:\n")
 	for _, sr := range inp.SessionResults {
+		critStr := ""
+		if sr.CriticalFail {
+			critStr = " [CRITICAL FAIL]"
+		}
+		phaseStr := ""
+		if sr.WeakestPhase != "" {
+			phaseStr = fmt.Sprintf(", weakest_phase=%s", sr.WeakestPhase)
+		}
+		dimStr := ""
+		if len(sr.DimensionScores) > 0 {
+			dimStr = fmt.Sprintf(", dimension_scores=%s", string(sr.DimensionScores))
+		}
+		evtStr := ""
+		if len(sr.EventCountBySeverity) > 0 {
+			evtStr = fmt.Sprintf(", events=%s", string(sr.EventCountBySeverity))
+		}
 		sb.WriteString(fmt.Sprintf(
-			"- Session %d: score=%.1f, lane_detected=%.1f%%, avg_iou=%.3f, passed=%v\n",
-			sr.SequenceNumber, sr.Score, sr.LaneDetectedPct, sr.AvgIoU, sr.Passed,
+			"- #%d %s: score=%.1f, lane_detected=%.1f%%, avg_iou=%.3f, mean_center_offset=%.1fpx, offset_variance=%.1f, passed=%v%s%s%s%s\n",
+			sr.SequenceNumber, string(sr.ManeuverType), sr.Score,
+			sr.LaneDetectedPct, sr.AvgIoU, sr.MeanCenterOffset, sr.OffsetVariance,
+			sr.Passed, critStr, phaseStr, dimStr, evtStr,
 		))
 	}
 	sb.WriteString(`
-Please provide a JSON response with exactly these 4 fields (no markdown, just raw JSON):
+Generate the assessment as JSON with exactly 4 keys:
 {
-  "overall": "<2-3 sentence overall narrative>",
-  "strengths": "<strengths observed>",
-  "weaknesses": "<areas needing improvement>",
-  "recommended_focus": "<top 1-2 things to practice>"
+  "overall": "...",
+  "strengths": "...",
+  "weaknesses": "...",
+  "recommended_focus": "..."
 }`)
 	return sb.String()
 }
 
 // parseNarrativeText extracts the JSON narrative from the model's text response.
 func parseNarrativeText(text string) *parsedNarrative {
-	// Strip markdown code fences if present
+	// JSON mode should return pure JSON, but strip fences defensively
 	text = strings.TrimSpace(text)
-	text = strings.TrimPrefix(text, "```json")
-	text = strings.TrimPrefix(text, "```")
-	text = strings.TrimSuffix(text, "```")
-	text = strings.TrimSpace(text)
+	if idx := strings.Index(text, "{"); idx > 0 {
+		text = text[idx:]
+	}
+	if idx := strings.LastIndex(text, "}"); idx >= 0 && idx < len(text)-1 {
+		text = text[:idx+1]
+	}
 
 	var out struct {
 		Overall          string `json:"overall"`
@@ -180,7 +236,7 @@ func parseNarrativeText(text string) *parsedNarrative {
 		RecommendedFocus string `json:"recommended_focus"`
 	}
 	if err := json.Unmarshal([]byte(text), &out); err != nil {
-		return &parsedNarrative{Overall: text}
+		return &parsedNarrative{Overall: strings.TrimSpace(text)}
 	}
 	return &parsedNarrative{
 		Overall:          out.Overall,

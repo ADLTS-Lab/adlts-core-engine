@@ -61,16 +61,14 @@ const deviceCols = `id, device_code, password_hash, test_center_id,
 
 func scanDevice(row pgx.Row) (*domain.Device, error) {
 	d := &domain.Device{}
-	var levelsJSON string
 	err := row.Scan(
 		&d.ID, &d.DeviceCode, &d.PasswordHash, &d.TestCenterID,
-		&levelsJSON, &d.StreamURL, &d.Status, &d.CurrentTestID, &d.LastSeenAt,
+		&d.AllowedLevels, &d.StreamURL, &d.Status, &d.CurrentTestID, &d.LastSeenAt,
 		&d.Audit.CreatedAt, &d.Audit.UpdatedAt, &d.Audit.CreatedBy, &d.Audit.UpdatedBy,
 	)
 	if err != nil {
 		return nil, err
 	}
-	_ = json.Unmarshal([]byte(levelsJSON), &d.AllowedLevels)
 	return d, nil
 }
 
@@ -652,6 +650,9 @@ func (r *Repository) GetAllSessionResults(ctx context.Context, testID uuid.UUID)
 		`SELECT id, test_id, session_id, maneuver_id, sequence_number, score, weight,
 			passed, frame_count, lane_detected_pct, avg_iou,
 			COALESCE(maneuver_type, ''), COALESCE(critical_fail, false),
+			COALESCE(mean_center_offset_px,0), COALESCE(offset_variance_px,0),
+			COALESCE(dimension_scores::text,'{}'), COALESCE(event_count_by_severity::text,'{}'),
+			COALESCE(weakest_phase,''),
 			created_at
 		FROM session_results WHERE test_id=$1 ORDER BY sequence_number`,
 		testID)
@@ -663,15 +664,25 @@ func (r *Repository) GetAllSessionResults(ctx context.Context, testID uuid.UUID)
 	for rows.Next() {
 		sr := &domain.SessionResult{}
 		var maneuverType string
+		var dimScoresStr, eventCountStr string
 		if err := rows.Scan(
 			&sr.ID, &sr.TestID, &sr.SessionID, &sr.ManeuverID, &sr.SequenceNumber,
 			&sr.Score, &sr.Weight, &sr.Passed, &sr.FrameCount, &sr.LaneDetectedPct, &sr.AvgIoU,
 			&maneuverType, &sr.CriticalFail,
+			&sr.MeanCenterOffset, &sr.OffsetVariance,
+			&dimScoresStr, &eventCountStr,
+			&sr.WeakestPhase,
 			&sr.CreatedAt,
 		); err != nil {
 			return nil, err
 		}
 		sr.ManeuverType = domain.ManeuverType(maneuverType)
+		if dimScoresStr != "{}" && dimScoresStr != "" {
+			_ = json.Unmarshal([]byte(dimScoresStr), &sr.DimensionScores)
+		}
+		if eventCountStr != "{}" && eventCountStr != "" {
+			_ = json.Unmarshal([]byte(eventCountStr), &sr.EventCountBySeverity)
+		}
 		results = append(results, sr)
 	}
 	return results, rows.Err()
@@ -1144,18 +1155,27 @@ func (r *Repository) ListTests(ctx context.Context, centerID uuid.UUID, statusFi
 	}
 	offset := (page - 1) * pageSize
 
-	args := []any{centerID}
-	where := `WHERE test_center_id=$1`
-	i := 2
+	var args []any
+	var clauses []string
+	i := 1
+	if centerID != uuid.Nil {
+		clauses = append(clauses, fmt.Sprintf("test_center_id=$%d", i))
+		args = append(args, centerID)
+		i++
+	}
 	if statusFilter != "" {
-		where += fmt.Sprintf(" AND status=$%d", i)
+		clauses = append(clauses, fmt.Sprintf("status=$%d", i))
 		args = append(args, statusFilter)
 		i++
 	}
 	if candidateID != uuid.Nil {
-		where += fmt.Sprintf(" AND candidate_id=$%d", i)
+		clauses = append(clauses, fmt.Sprintf("candidate_id=$%d", i))
 		args = append(args, candidateID)
 		i++
+	}
+	where := ""
+	if len(clauses) > 0 {
+		where = "WHERE " + strings.Join(clauses, " AND ")
 	}
 	args = append(args, pageSize, offset)
 	q := fmt.Sprintf(

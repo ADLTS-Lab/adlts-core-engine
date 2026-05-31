@@ -457,7 +457,7 @@ func (s *Service) AcceptInvitation(ctx context.Context, req AcceptInvitationRequ
 	case "institute":
 		inst := &domain.Institute{BaseOrg: domain.BaseOrg{
 			ID: uuid.New(), Name: req.Name, Email: inv.Email,
-			PasswordHash: hash, Status: domain.OrgStatusPendingApproval,
+			PasswordHash: hash, Status: domain.OrgStatusActive,
 			Audit: domain.Audit{CreatedAt: now, UpdatedAt: now, CreatedBy: inv.CreatedBy, UpdatedBy: inv.CreatedBy},
 		}}
 		if err := s.repo.CreateInstitute(ctx, inst); err != nil {

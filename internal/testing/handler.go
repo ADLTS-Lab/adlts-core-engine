@@ -6,6 +6,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log"
 	"net/http"
 	"net/url"
 	"strconv"
@@ -31,6 +32,9 @@ type Handler struct {
 	tokens         *security.Manager
 	internalAPIKey string
 	orchestrator   *Orchestrator // set after startup via SetOrchestrator
+	adltsServiceURL string       // set by SetAdltsServiceURL
+	healthCheck    *HealthChecker
+	narrativeGenerator *NarrativeGenerator
 }
 
 func NewHandler(repo *Repository, minio *minioclient.Client, cfg config.Config, tokens *security.Manager) *Handler {
@@ -46,6 +50,15 @@ func NewHandler(repo *Repository, minio *minioclient.Client, cfg config.Config, 
 // SetOrchestrator injects the orchestrator after construction (called from app.go).
 func (h *Handler) SetOrchestrator(o *Orchestrator) { h.orchestrator = o }
 
+// SetAdltsServiceURL sets the ADLTS Python service URL for test start/webhook calls.
+func (h *Handler) SetAdltsServiceURL(url string) { h.adltsServiceURL = url }
+
+// SetHealthChecker sets the IoT health checker for test start.
+func (h *Handler) SetHealthChecker(hc *HealthChecker) { h.healthCheck = hc }
+
+// SetNarrativeGenerator sets the LLM narrative generator for async result enrichment.
+func (h *Handler) SetNarrativeGenerator(ng *NarrativeGenerator) { h.narrativeGenerator = ng }
+
 // adminAbortTest lets an admin abort a running test.
 func (h *Handler) adminAbortTest(w http.ResponseWriter, r *http.Request) {
 	id, err := uuid.Parse(chi.URLParam(r, "id"))
@@ -58,13 +71,23 @@ func (h *Handler) adminAbortTest(w http.ResponseWriter, r *http.Request) {
 		httpx.Failure(w, http.StatusNotFound, "TEST_NOT_FOUND", "test not found", nil)
 		return
 	}
-	if h.orchestrator != nil {
-		h.orchestrator.AbortTest(r.Context(), id, test.DeviceID, domain.AbortAdminIntervention)
-	} else {
-		_ = h.repo.AbortTest(r.Context(), id, domain.AbortAdminIntervention, systemActorID)
-		if test.DeviceID != nil {
-			_ = h.repo.ReleaseDevice(r.Context(), *test.DeviceID, systemActorID)
+	if h.adltsServiceURL != "" {
+		// Stop via ADLTS Python service
+		stopURL := h.adltsServiceURL + "/test/" + id.String() + "/stop"
+		resp, _ := http.Post(stopURL, "application/json", nil)
+		if resp != nil {
+			_ = resp.Body.Close()
 		}
+	}
+	_ = h.repo.AbortTest(r.Context(), id, domain.AbortAdminIntervention, systemActorID)
+
+	if test.DeviceID != nil {
+		device, err := h.repo.DeviceByID(r.Context(), *test.DeviceID)
+		if err == nil {
+			iot := NewIoTClient(device.StreamURL)
+			_ = iot.SendAbort(id.String(), string(domain.AbortAdminIntervention))
+		}
+		_ = h.repo.ReleaseDevice(r.Context(), *test.DeviceID, systemActorID)
 	}
 	httpx.Success(w, http.StatusOK, map[string]string{"status": "aborted"}, nil)
 }
@@ -665,7 +688,6 @@ func (h *Handler) deviceCheckin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Check level allowed on device
 	var allowed []string
 	_ = json.Unmarshal([]byte(device.AllowedLevels), &allowed)
 	levelOK := false
@@ -676,6 +698,7 @@ func (h *Handler) deviceCheckin(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	if !levelOK {
+		log.Printf("LEVEL_NOT_ALLOWED: device_allowed=%q test_level=%q", device.AllowedLevels, test.TestLevelCode)
 		httpx.Failure(w, http.StatusForbidden, "LEVEL_NOT_ALLOWED", "this device does not support this test level", nil)
 		return
 	}
@@ -1832,4 +1855,367 @@ func (h *Handler) cancelTestByBooking(w http.ResponseWriter, r *http.Request) {
 		_ = h.repo.ReleaseDevice(r.Context(), *t.DeviceID, systemActorID)
 	}
 	httpx.Success(w, http.StatusOK, map[string]string{"status": "cancelled"}, nil)
+}
+
+// CandidateLiveSession is the lightweight current-session view served to candidates.
+type CandidateLiveSession struct {
+	SessionID      uuid.UUID `json:"session_id"`
+	ManeuverType   string    `json:"maneuver_type"`
+	SequenceNumber int       `json:"sequence_number"`
+	StartedAt      time.Time `json:"started_at"`
+}
+
+// CandidateLiveResponse is returned by GET /tests/{id}/live.
+type CandidateLiveResponse struct {
+	TestID         string                `json:"test_id"`
+	Status         string                `json:"status"`
+	SessionsTotal  int                   `json:"sessions_total"`
+	SessionsDone   int                   `json:"sessions_done"`
+	CurrentSession *CandidateLiveSession `json:"current_session,omitempty"`
+}
+
+// getCandidateLive handles GET /api/v1/tests/{id}/live.
+// Returns a lightweight real-time view for the candidate during a running test:
+// current maneuver, sessions completed, and test status.
+// Candidates may only view their own test; admins may view any test.
+// ── Phase 4: Test Start via ADLTS Service ───────────────────────────────────
+
+func (h *Handler) startTest(w http.ResponseWriter, r *http.Request) {
+	id, err := uuid.Parse(chi.URLParam(r, "id"))
+	if err != nil {
+		httpx.Failure(w, http.StatusBadRequest, "INVALID_ID", "test ID must be a UUID", nil)
+		return
+	}
+	auth := mustAuth(w, r)
+	if auth == nil {
+		return
+	}
+
+	test, err := h.repo.TestByID(r.Context(), id)
+	if err != nil {
+		httpx.Failure(w, http.StatusNotFound, "TEST_NOT_FOUND", "test not found", nil)
+		return
+	}
+
+	// If caller is a candidate, verify they own this test
+	if auth.EntityType == security.EntityCandidate && test.CandidateID != auth.SubjectID {
+		httpx.Failure(w, http.StatusForbidden, "FORBIDDEN", "you can only start your own test", nil)
+		return
+	}
+
+	if test.Status != domain.TestStatusAcknowledged {
+		httpx.Failure(w, http.StatusConflict, "INVALID_STATUS",
+			"test must be in 'acknowledged' status to start — complete device check-in and guidelines first", nil)
+		return
+	}
+	if test.DeviceID == nil {
+		httpx.Failure(w, http.StatusBadRequest, "NO_DEVICE", "no device assigned to this test", nil)
+		return
+	}
+
+	device, err := h.repo.DeviceByID(r.Context(), *test.DeviceID)
+	if err != nil {
+		httpx.Failure(w, http.StatusInternalServerError, "DEVICE_ERROR", "failed to load device", nil)
+		return
+	}
+
+	// 1. IoT health check — ping the ESP32
+	_, err = h.healthCheck.Check(r.Context(), test, device.StreamURL)
+	if err != nil {
+		_ = h.repo.AbortTest(r.Context(), id, domain.AbortHealthCheckFailed, auth.SubjectID)
+		_ = h.repo.ReleaseDevice(r.Context(), *test.DeviceID, auth.SubjectID)
+		httpx.Failure(w, http.StatusFailedDependency, "HEALTH_CHECK_FAILED",
+			"device health check failed: "+err.Error(), nil)
+		return
+	}
+
+	// 2. Turn on flash for calibration and test
+	iot := NewIoTClient(device.StreamURL)
+	_ = iot.SetFlash(true, 128)
+
+	// 3. Calibrate via ADLTS service (connects to device stream, captures frame, finds lanes)
+	calibOK := h.callAdltsCalibrate(device.StreamURL)
+	if !calibOK {
+		httpx.Failure(w, http.StatusFailedDependency, "CALIBRATION_FAILED",
+			"lane calibration failed — ensure car is centred on a straight lane", nil)
+		return
+	}
+
+	// 4. Load maneuvers for the plan
+	maneuvers, err := h.repo.ManeuversByPlanID(r.Context(), test.TestPlanID)
+	if err != nil || len(maneuvers) == 0 {
+		httpx.Failure(w, http.StatusInternalServerError, "NO_MANEUVERS", "no maneuvers configured for this plan", nil)
+		return
+	}
+
+	// 5. Start test via ADLTS service
+	startOK := h.callAdltsStartTest(test.ID.String(), test.CandidateID.String(), device.StreamURL)
+	if !startOK {
+		httpx.Failure(w, http.StatusFailedDependency, "START_FAILED", "failed to start test via ADLTS service", nil)
+		return
+	}
+
+	// 5.5. Notify IoT device
+	var planName string
+	if p, err := h.repo.TestPlanByID(r.Context(), test.TestPlanID); err == nil {
+		planName = p.Name
+	} else {
+		planName = "ADLTS Test"
+	}
+	_ = iot.SendStart(test.ID.String(), planName)
+
+	// 5. Mark test as running in DB
+	_ = h.repo.StartTest(r.Context(), id, auth.SubjectID)
+
+	// Return device IP info so admin can monitor
+	httpx.Success(w, http.StatusOK, StartTestResponse{
+		Ok:      true,
+		Status:  string(domain.TestStatusRunning),
+		Message: "Test started — device IP: " + device.StreamURL,
+	}, nil)
+}
+
+// callAdltsCalibrate calls the ADLTS Python service's /calibrate endpoint.
+func (h *Handler) callAdltsCalibrate(deviceIP string) bool {
+	if h.adltsServiceURL == "" {
+		return true // fall through if not configured
+	}
+	calibURL := h.adltsServiceURL + "/calibrate?device_ip=" + url.QueryEscape(deviceIP)
+	resp, err := http.Post(calibURL, "application/json", nil)
+	if err != nil {
+		return false
+	}
+	defer resp.Body.Close()
+	return resp.StatusCode == http.StatusOK
+}
+
+// callAdltsStartTest calls the ADLTS Python service's /start_test endpoint.
+func (h *Handler) callAdltsStartTest(testID, candidateID, deviceIP string) bool {
+	if h.adltsServiceURL == "" {
+		return false
+	}
+	startURL := h.adltsServiceURL + "/start_test"
+	webhookURL := fmt.Sprintf("http://api:%s/internal/tests/%s/result",
+		h.cfg.Port, testID)
+
+	body := map[string]any{
+		"test_id":          testID,
+		"candidate_id":     candidateID,
+		"device_ip":        deviceIP,
+		"go_webhook_url":   webhookURL,
+		"internal_api_key": h.internalAPIKey,
+	}
+	b, _ := json.Marshal(body)
+	resp, err := http.Post(startURL, "application/json", bytes.NewReader(b))
+	if err != nil {
+		return false
+	}
+	defer resp.Body.Close()
+	return resp.StatusCode == http.StatusOK
+}
+
+// ── Phase 4: Result Webhook (called by ADLTS Python service) ────────────────
+
+func (h *Handler) resultWebhook(w http.ResponseWriter, r *http.Request) {
+	testIDStr := chi.URLParam(r, "id")
+	testID, err := uuid.Parse(testIDStr)
+	if err != nil {
+		httpx.Failure(w, http.StatusBadRequest, "INVALID_ID", "test ID must be a UUID", nil)
+		return
+	}
+
+	var req ResultWebhookRequest
+	if err := httpx.DecodeJSON(r, &req); err != nil {
+		httpx.Failure(w, http.StatusBadRequest, "DECODE_ERROR", err.Error(), nil)
+		return
+	}
+
+	ctx := r.Context()
+
+	// 1. Load test + plan
+	test, err := h.repo.TestByID(ctx, testID)
+	if err != nil {
+		httpx.Failure(w, http.StatusNotFound, "TEST_NOT_FOUND", "test not found", nil)
+		return
+	}
+	_, _ = h.repo.TestPlanByID(ctx, test.TestPlanID)
+	if err != nil {
+		httpx.Failure(w, http.StatusInternalServerError, "DB_ERROR", "failed to load test plan", nil)
+		return
+	}
+
+	// 2. Parse the candidate ID from the webhook payload
+	candidateID, _ := uuid.Parse(req.CandidateID)
+
+	// 3. Persist each maneuver as a test_session + session_result
+	maneuvers, err := h.repo.ManeuversByPlanID(ctx, test.TestPlanID)
+	if err != nil {
+		log.Printf("error loading maneuvers: %v", err)
+	}
+	for i, mw := range req.Maneuvers {
+		maneuverID := uuid.Nil
+		if i < len(maneuvers) {
+			maneuverID = maneuvers[i].ID
+		}
+		sessionID := uuid.New()
+
+		// Insert test_session
+		if err := h.repo.InsertTestSession(ctx, &domain.TestSession{
+			ID:             sessionID,
+			TestID:         testID,
+			ManeuverID:     maneuverID,
+			SequenceNumber: i + 1,
+			StartFrameSeq:  0,
+			StartedAt:      time.Now(),
+			FrameCount:     mw.FrameCount,
+		}); err != nil {
+			log.Printf("error inserting test session: %v", err)
+		}
+
+		// Insert session_result
+		if err := h.repo.UpsertSessionResult(ctx, domain.SessionResult{
+			ID:              uuid.New(),
+			TestID:          testID,
+			SessionID:       sessionID,
+			ManeuverID:      maneuverID,
+			SequenceNumber:  i + 1,
+			Score:           mw.FinalScore,
+			Weight:          1.0,
+			Passed:          mw.FinalScore >= 70.0,
+			ManeuverType:    domain.ManeuverType(mw.Name),
+			FrameCount:      mw.FrameCount,
+			LaneDetectedPct: 100.0,
+			AvgIoU:          0.0,
+		}); err != nil {
+			log.Printf("error upserting session result: %v", err)
+		}
+	}
+
+	// 4. Insert test_result
+	testResult := &domain.TestResult{
+		ID:                 uuid.New(),
+		TestID:             testID,
+		WeightedTotalScore: req.TotalScore,
+		Passed:             req.Passed,
+		PassThreshold:      req.PassThreshold,
+		AnyCriticalFail:    false,
+		WeakestManeuver:    "",
+	}
+	if err := h.repo.InsertTestResult(ctx, testResult); err != nil {
+		log.Printf("error inserting test result: %v", err)
+		httpx.Failure(w, http.StatusInternalServerError, "DB_ERROR", "failed to save test result", nil)
+		return
+	}
+
+	// 5. Complete the test (status = completed, score + passed updated)
+	if err := h.repo.CompleteTest(ctx, testID, req.TotalScore, req.Passed, systemActorID); err != nil {
+		log.Printf("error completing test: %v", err)
+	}
+
+	// 6. Record the MinIO recording prefix
+	if err := h.repo.CreateTestRecording(ctx, testID, req.RecordingPrefix); err != nil {
+		log.Printf("error creating test recording: %v", err)
+	}
+	if err := h.repo.FinalizeTestRecording(ctx, testID, 0, 0, "saved"); err != nil {
+		log.Printf("error finalizing test recording: %v", err)
+	}
+
+	// 7. Fire LLM narrative asynchronously
+	if candidateID != uuid.Nil {
+		go func() {
+			narrative := h.narrativeGenerator
+			if narrative == nil {
+				return
+			}
+			srs, err := h.repo.GetAllSessionResults(ctx, testID)
+			if err != nil {
+				log.Printf("error getting session results for narrative: %v", err)
+				return
+			}
+
+			narr, err := narrative.Generate(context.Background(), &NarrativeInput{
+				TestID:         testID.String(),
+				LevelCode:      test.TestLevelCode,
+				TotalScore:     req.TotalScore,
+				Passed:         req.Passed,
+				PassThreshold:  req.PassThreshold,
+				SessionResults: srs,
+			})
+			if err != nil {
+				log.Printf("narrative generation failed: %v", err)
+			}
+			if narr != nil {
+				if err := h.repo.UpdateTestResultNarrative(context.Background(), testID,
+					narr.Overall, narr.Strengths, narr.Weaknesses,
+					narr.RecommendedFocus, narr.ModelUsed); err != nil {
+					log.Printf("error saving narrative: %v", err)
+				}
+			}
+		}()
+	}
+
+	// 8. Notify IoT device that test finished
+	if test.DeviceID != nil {
+		device, err := h.repo.DeviceByID(ctx, *test.DeviceID)
+		if err == nil {
+			iot := NewIoTClient(device.StreamURL)
+			_ = iot.SendEnd(testID.String(), req.Passed)
+		}
+	}
+
+	httpx.Success(w, http.StatusOK, map[string]string{"status": "result_saved"}, nil)
+}
+
+func (h *Handler) getCandidateLive(w http.ResponseWriter, r *http.Request) {
+	id, err := uuid.Parse(chi.URLParam(r, "id"))
+	if err != nil {
+		httpx.Failure(w, http.StatusBadRequest, "INVALID_ID", "test ID must be a UUID", nil)
+		return
+	}
+	auth := mustAuth(w, r)
+	if auth == nil {
+		return
+	}
+
+	test, err := h.repo.TestByID(r.Context(), id)
+	if err != nil {
+		httpx.Failure(w, http.StatusNotFound, "TEST_NOT_FOUND", "test not found", nil)
+		return
+	}
+
+	// Candidates may only view their own test
+	if auth.EntityType == security.EntityCandidate && test.CandidateID != auth.SubjectID {
+		httpx.Failure(w, http.StatusForbidden, "FORBIDDEN", "not your test", nil)
+		return
+	}
+
+	sessions, err := h.repo.ListTestSessions(r.Context(), id)
+	if err != nil {
+		httpx.Failure(w, http.StatusInternalServerError, "DB_ERROR", err.Error(), nil)
+		return
+	}
+
+	var current *CandidateLiveSession
+	done := 0
+	for i := range sessions {
+		s := &sessions[i]
+		if s.EndedAt != nil {
+			done++
+		} else if current == nil {
+			current = &CandidateLiveSession{
+				SessionID:      s.ID,
+				ManeuverType:   string(s.ManeuverType),
+				SequenceNumber: s.SequenceNumber,
+				StartedAt:      s.StartedAt,
+			}
+		}
+	}
+
+	httpx.Success(w, http.StatusOK, CandidateLiveResponse{
+		TestID:         id.String(),
+		Status:         string(test.Status),
+		SessionsTotal:  len(sessions),
+		SessionsDone:   done,
+		CurrentSession: current,
+	}, nil)
 }

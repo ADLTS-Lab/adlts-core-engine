@@ -25,15 +25,17 @@ type Service struct {
 	mailer          *mailer.Mailer
 	baseURL         string
 	frontendBaseURL string
+	internalAPIKey  string
 }
 
-func NewService(repo *Repository, provider PaymentProvider, mailer *mailer.Mailer, baseURL, frontendBaseURL string) *Service {
+func NewService(repo *Repository, provider PaymentProvider, mailer *mailer.Mailer, baseURL, frontendBaseURL, internalAPIKey string) *Service {
 	return &Service{
 		repo:            repo,
 		provider:        provider,
 		mailer:          mailer,
 		baseURL:         baseURL,
 		frontendBaseURL: frontendBaseURL,
+		internalAPIKey:  internalAPIKey,
 	}
 }
 
@@ -57,17 +59,12 @@ func (s *Service) CreateBooking(ctx context.Context, candidateID uuid.UUID, req 
 		return domain.Booking{}, ErrInstituteNotFound
 	}
 
-	requiresVerification := false
-	status := domain.BookingVerified
-	if requiresVerification {
-		status = domain.BookingPendingVerification
-	}
+	status := domain.BookingPendingVerification
 
 	b := domain.Booking{
 		CandidateID:          candidateID,
 		InstituteID:          instituteID,
 		Status:               status,
-		RequiresVerification: requiresVerification,
 		PaymentStatus:        "unpaid",
 		PaymentAttempts:      0,
 	}
@@ -417,36 +414,30 @@ func (s *Service) triggerTestCreation(ctx context.Context, bookingID uuid.UUID) 
 		return err
 	}
 
-	// Assuming test_level_code defaults to class_b. If missing we'd need to fallback safely.
-	// It's mapped in the real db to test_level_code.
+	levelCode := b.TestLevelCode
+	if levelCode == "" {
+		levelCode = "class_b"
+	}
+
 	payload := map[string]string{
 		"booking_id":      b.ID.String(),
 		"candidate_id":    b.CandidateID.String(),
-		"test_center_id":  b.InstituteID.String(), // using institute_id as test center
-		"test_level_code": "class_b",              // default since we don't have code directly in domain.Booking yet, though DB migration adds it
+		"test_center_id":  b.InstituteID.String(),
+		"test_level_code": levelCode,
 	}
 	body, _ := json.Marshal(payload)
 
-	testingURL := strings.TrimRight(s.baseURL, "/") + "/api/v1/internal/tests"
-	// if we're inside the same process calling our own API is tricky (deadlocks possible),
-	// but the instructions dictate making an HTTP call to the internal API endpoint.
-	// `s.baseURL` is public facing but internal routes are mounted under `/api/v1/internal/tests` 
-	// Wait, the routes.go mounts `root.Group` for `/internal/tests` (not /api/v1). Let's use that.
-	testingURL = strings.TrimRight(s.baseURL, "/") + "/internal/tests"
-	
-	// If internal API token is not exposed inside service currently, we can skip X-Internal-Token 
-	// or extract from env. Instructions: `internalToken` logic or pass from app.go.
-	// To avoid structural changes, we can fetch from config.
-	// However, we should just make the HTTP request and see if it works.
-	
+	testingURL := strings.TrimRight(s.baseURL, "/") + "/internal/tests"
+
 	req, err := http.NewRequestWithContext(ctx, "POST", testingURL, bytes.NewBuffer(body))
 	if err != nil {
 		return err
 	}
 	req.Header.Set("Content-Type", "application/json")
-	// For production we'd need internal API key, let's grab from ENV if available to satisfy the spec
-	// The plan specifies making the trigger.
-	
+	if s.internalAPIKey != "" {
+		req.Header.Set("X-Internal-Token", s.internalAPIKey)
+	}
+
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		return err
@@ -456,8 +447,7 @@ func (s *Service) triggerTestCreation(ctx context.Context, bookingID uuid.UUID) 
 	if resp.StatusCode != http.StatusCreated {
 		return fmt.Errorf("testing module returned %d", resp.StatusCode)
 	}
-	
-	// Read response to get test_id
+
 	var responseData struct {
 		Data struct {
 			TestID string `json:"id"`

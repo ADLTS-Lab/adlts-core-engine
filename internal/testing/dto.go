@@ -12,7 +12,7 @@ type RegisterDeviceRequest struct {
 	DeviceCode    string   `json:"device_code"`
 	Password      string   `json:"password"`
 	TestCenterID  string   `json:"test_center_id"`
-	AllowedLevels []string `json:"allowed_levels"` // e.g. ["class_b","class_be"]
+	AllowedLevels []string `json:"allowed_levels"`
 	StreamURL     string   `json:"stream_url"`
 }
 
@@ -22,7 +22,7 @@ type UpdateDeviceRequest struct {
 }
 
 type UpdateDeviceStatusRequest struct {
-	Status string `json:"status"` // active | inactive | maintenance
+	Status string `json:"status"`
 }
 
 type DeviceResponse struct {
@@ -73,7 +73,7 @@ type TestPlanResponse struct {
 	CreatedAt     time.Time          `json:"created_at"`
 }
 
-// ── Maneuver DTOs (legacy — migration-002 schema) ───────────────────────────────────
+// ── Maneuver DTOs (legacy) ────────────────────────────────────────────────────
 
 type CreateManeuverRequest struct {
 	Name              string  `json:"name"`
@@ -107,10 +107,8 @@ type ManeuverResponse struct {
 	CreatedAt         time.Time `json:"created_at"`
 }
 
-// ── Maneuver Config DTOs (migration-003 schema) ─────────────────────────────────
+// ── Maneuver Config DTOs (migration-003 schema) ───────────────────────────────
 
-// CreateManeuverConfigRequest is the body for POST /test-plans/{planID}/maneuvers.
-// Admin selects from AllManeuverTypes; qr_start_value/qr_end_value are DB-generated.
 type CreateManeuverConfigRequest struct {
 	ManeuverType      string  `json:"maneuver_type"`
 	DisplayName       string  `json:"display_name"`
@@ -121,7 +119,6 @@ type CreateManeuverConfigRequest struct {
 	SequenceNumber    int     `json:"sequence_number"`
 }
 
-// UpdateManeuverConfigRequest is the body for PATCH /test-plans/{planID}/maneuvers/{maneuverID}.
 type UpdateManeuverConfigRequest struct {
 	DisplayName       *string  `json:"display_name,omitempty"`
 	Weight            *float64 `json:"weight,omitempty"`
@@ -130,12 +127,10 @@ type UpdateManeuverConfigRequest struct {
 	MinFramesRequired *int     `json:"min_frames_required,omitempty"`
 }
 
-// ReorderManeuverConfigRequest is the body for POST /test-plans/{planID}/maneuvers/reorder.
 type ReorderManeuverConfigRequest struct {
 	OrderedIDs []uuid.UUID `json:"ordered_ids"`
 }
 
-// ManeuverConfigResponse is the response for the migration-003 maneuver endpoints.
 type ManeuverConfigResponse struct {
 	ID                uuid.UUID `json:"id"`
 	TestPlanID        uuid.UUID `json:"test_plan_id"`
@@ -152,9 +147,8 @@ type ManeuverConfigResponse struct {
 	UpdatedAt         time.Time `json:"updated_at"`
 }
 
-// ── Admin Test CRUD DTOs ─────────────────────────────────────────────────────────────
+// ── Admin Test CRUD DTOs ──────────────────────────────────────────────────────
 
-// CreateTestAdminRequest is the body for POST /tests (admin manual override).
 type CreateTestAdminRequest struct {
 	CandidateID   uuid.UUID `json:"candidate_id"`
 	TestCenterID  uuid.UUID `json:"test_center_id"`
@@ -162,19 +156,16 @@ type CreateTestAdminRequest struct {
 	BookingID     uuid.UUID `json:"booking_id"`
 }
 
-// UpdateTestAdminRequest is the body for PATCH /tests/{id}.
 type UpdateTestAdminRequest struct {
 	AppealWindowClosesAt       *time.Time `json:"appeal_window_closes_at,omitempty"`
 	ResultVisibleToCandidateAt *time.Time `json:"result_visible_to_candidate_at,omitempty"`
 	ResultVisibleToInstituteAt *time.Time `json:"result_visible_to_institute_at,omitempty"`
 }
 
-// RecordingURLResponse is returned by GET /tests/{id}/recording and
-// GET /tests/{id}/sessions/{sessionID}/recording.
 type RecordingURLResponse struct {
 	URL       string    `json:"url"`
 	ExpiresAt time.Time `json:"expires_at"`
-	Status    string    `json:"status"` // recording | saved | failed | not_ready
+	Status    string    `json:"status"`
 }
 
 // ── TestLevelMapping DTOs ─────────────────────────────────────────────────────
@@ -207,6 +198,39 @@ type DeviceCheckinRequest struct {
 	DeviceCode   string    `json:"device_code"`
 	Password     string    `json:"password"`
 	TestCenterID uuid.UUID `json:"test_center_id"`
+}
+
+// ── Test Start DTOs ───────────────────────────────────────────────────────────
+
+type StartTestRequest struct {
+	TestCenterID uuid.UUID `json:"test_center_id"`
+}
+
+type StartTestResponse struct {
+	Ok      bool   `json:"ok"`
+	Status  string `json:"status"`
+	Message string `json:"message"`
+}
+
+// ── Result Webhook DTOs ───────────────────────────────────────────────────────
+
+type ResultWebhookRequest struct {
+	TestID          string            `json:"test_id"`
+	CandidateID     string            `json:"candidate_id"`
+	TotalScore      float64           `json:"total_score"`
+	Passed          bool              `json:"passed"`
+	PassThreshold   float64           `json:"pass_threshold"`
+	RecordingPrefix string            `json:"recording_prefix"`
+	Maneuvers       []ManeuverWebhook `json:"maneuvers"`
+}
+
+type ManeuverWebhook struct {
+	Name       string  `json:"name"`
+	RawScore   float64 `json:"raw_score"`
+	Penalty    float64 `json:"penalty"`
+	FinalScore float64 `json:"final_score"`
+	FrameCount int     `json:"frame_count"`
+	Violations int     `json:"violations"`
 }
 
 // ── Test Result DTOs ──────────────────────────────────────────────────────────
@@ -257,13 +281,13 @@ type FrameAnalysisResponse struct {
 // ── Test response ─────────────────────────────────────────────────────────────
 
 type TestResponse struct {
-	ID            uuid.UUID  `json:"id"`
-	BookingID     uuid.UUID  `json:"booking_id"`
-	CandidateID   uuid.UUID  `json:"candidate_id"`
-	TestCenterID  uuid.UUID  `json:"test_center_id"`
-	TestPlanID    uuid.UUID  `json:"test_plan_id"`
-	DeviceID      *uuid.UUID `json:"device_id,omitempty"`
-	TestLevelCode string     `json:"test_level_code"`
+	ID                 uuid.UUID  `json:"id"`
+	BookingID          uuid.UUID  `json:"booking_id"`
+	CandidateID        uuid.UUID  `json:"candidate_id"`
+	TestCenterID       uuid.UUID  `json:"test_center_id"`
+	TestPlanID         uuid.UUID  `json:"test_plan_id"`
+	DeviceID           *uuid.UUID `json:"device_id,omitempty"`
+	TestLevelCode      string     `json:"test_level_code"`
 	Status             string     `json:"status"`
 	AbortReason        *string    `json:"abort_reason,omitempty"`
 	ScheduledStartAt   *time.Time `json:"scheduled_start_at,omitempty"`

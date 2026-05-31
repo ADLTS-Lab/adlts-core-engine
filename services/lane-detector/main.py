@@ -1,7 +1,6 @@
 """
-ADLTS Lane Detector + Scorer Microservice
+ADLTS Lane Detector Microservice
 """
-
 from __future__ import annotations
 
 import base64
@@ -11,10 +10,10 @@ from typing import Optional
 
 import cv2
 import lane_classical
+import lane_hough
 import lane_onnx
 import numpy as np
 from fastapi import FastAPI, HTTPException
-from fastapi.responses import JSONResponse
 from motion_detector import MotionDirectionDetector
 from pydantic import BaseModel
 from qr_decoder import QRDecoder
@@ -27,9 +26,6 @@ app = FastAPI(title="ADLTS Lane Detector", version="2.0.0")
 
 _qr_decoder = QRDecoder()
 _motion_det = MotionDirectionDetector()
-
-
-# ── Request / Response models ─────────────────────────────────────────────────
 
 
 class DetectRequest(BaseModel):
@@ -60,13 +56,10 @@ class DetectResponse(BaseModel):
     lane_symmetry: float
     motion_dir: str
     iou_score: float
-    qr_event: Optional[str]  # raw QR string e.g. "ADLTS:S:left_curve:uuid"
+    qr_event: Optional[str]
     maneuver_phase: str
     raw_lanes: Optional[RawLanes]
     is_mocked: bool
-
-
-# ── Endpoints ─────────────────────────────────────────────────────────────────
 
 
 @app.get("/health")
@@ -86,12 +79,18 @@ def detect(req: DetectRequest):
     if frame is None:
         return _mocked_response(req)
 
-    # ── Lane detection ────────────────────────────────────────────────────────
-    lane = lane_classical.detect(frame)
-    if not lane.lane_detected or (len(lane.left_xs) < 5 and len(lane.right_xs) < 5):
+    # ── Lane detection — priority: Hough > ONNX > classical bird's-eye ─────────
+    lane = lane_hough.detect(frame)
+
+    if not lane.lane_detected:
         onnx_lane = lane_onnx.detect(frame)
         if onnx_lane is not None and onnx_lane.lane_detected:
             lane = onnx_lane
+
+    if not lane.lane_detected:
+        classical_lane = lane_classical.detect(frame)
+        if classical_lane.lane_detected:
+            lane = classical_lane
 
     # ── QR detection ─────────────────────────────────────────────────────────
     qr_raw: Optional[str] = None
@@ -114,9 +113,9 @@ def detect(req: DetectRequest):
         motion_dir=motion,
         iou_score=round(lane.iou_score, 4),
         qr_event=qr_raw,
-        maneuver_phase="",  # assigned by ManeuverSegmenter on Go side
+        maneuver_phase="",
         raw_lanes=RawLanes(
-            left_xs=lane.left_xs[:20],  # sample max 20 points
+            left_xs=lane.left_xs[:20],
             left_ys=lane.left_ys[:20],
             right_xs=lane.right_xs[:20],
             right_ys=lane.right_ys[:20],

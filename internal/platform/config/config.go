@@ -42,7 +42,7 @@ type Config struct {
 	MinioBucket    string
 	MinioUseSSL    bool
 
-	LaneDetectorURL string
+	AdltsServiceURL string
 
 	GeminiAPIKey string
 	GeminiModel  string
@@ -89,7 +89,7 @@ func Load() Config {
 		MinioBucket:    getEnv("MINIO_BUCKET", "adlts"),
 		MinioUseSSL:    getEnv("MINIO_USE_SSL", "false") == "true",
 
-		LaneDetectorURL: getEnv("LANE_DETECTOR_URL", "http://localhost:8001"),
+		AdltsServiceURL: getEnv("ADLTS_SERVICE_URL", "http://adlts-service:8002"),
 
 		GeminiAPIKey: getEnv("GEMINI_API_KEY", ""),
 		GeminiModel:  getEnv("GEMINI_MODEL", "gemini-1.5-flash"),

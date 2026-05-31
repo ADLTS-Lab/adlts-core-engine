@@ -1,4 +1,4 @@
-name: adlts
+version: "3.8"
 
 services:
   # ── PostgreSQL ──────────────────────────────────────────────────────────────
@@ -11,9 +11,9 @@ services:
       POSTGRES_PASSWORD: password
     volumes:
       - pgdata:/var/lib/postgresql/data
-      - ./migrations:/docker-entrypoint-initdb.d:ro   # auto-runs on first boot
+      - ./migrations:/docker-entrypoint-initdb.d:ro
     ports:
-      - "5433:5432"    # host:5433 → container:5432 (avoids conflict with local PG)
+      - "5433:5432"
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U postgres -d adlts"]
       interval: 10s
@@ -28,17 +28,16 @@ services:
     restart: unless-stopped
     env_file: .env
     environment:
-      # Override database host for Docker networking
       DATABASE_URL: postgres://postgres:password@db:5432/adlts?sslmode=disable
-      # Store uploads in the mounted volume
       UPLOADS_DIR: /uploads
-      # Base URL for API and frontend return URL
       APP_URL: ${APP_URL:-http://localhost:8080}
       FRONTEND_BASE_URL: ${FRONTEND_BASE_URL:-http://localhost:3000}
-      # Chapa payment
       CHAPA_SECRET_KEY: ${CHAPA_SECRET_KEY:-CHASECK_test_placeholder}
       CHAPA_WEBHOOK_SECRET: ${CHAPA_WEBHOOK_SECRET:-dev_webhook_secret}
       CHAPA_BASE_URL: ${CHAPA_BASE_URL:-https://api.chapa.co/v1}
+      ADLTS_SERVICE_URL: http://adlts-service:8002
+      GEMINI_API_KEY: ${GEMINI_API_KEY}
+      GEMINI_MODEL: ${GEMINI_MODEL:-gemini-2.5-flash}
     ports:
       - "8080:8080"
     volumes:
@@ -62,8 +61,8 @@ services:
       MINIO_ROOT_USER: minioadmin
       MINIO_ROOT_PASSWORD: minioadmin
     ports:
-      - "9000:9000"   # S3 API
-      - "9001:9001"   # Web console  (http://localhost:9001)
+      - "9000:9000"
+      - "9001:9001"
     volumes:
       - miniodata:/data
     healthcheck:
@@ -72,20 +71,29 @@ services:
       timeout: 5s
       retries: 5
 
-  # ── Lane Detector (Python FastAPI) ───────────────────────────────────────────
-  lane-detector:
+  # ── ADLTS Driving Test Service (Python FastAPI, port 8002) ─────────────────
+  adlts-service:
     build:
-      context: ./services/lane-detector
+      context: ./services/adlts
       dockerfile: Dockerfile
     restart: unless-stopped
     ports:
-      - "8001:8001"
+      - "8002:8002"
+    environment:
+      MINIO_ENDPOINT: minio:9000
+      MINIO_ACCESS: minioadmin
+      MINIO_SECRET: minioadmin
+      MINIO_BUCKET: adlts
+    depends_on:
+      minio:
+        condition: service_started
     healthcheck:
-      test: ["CMD-SHELL", "curl -sf http://localhost:8001/health || exit 1"]
+      test: ["CMD", "python3", "-c",
+        "import urllib.request; urllib.request.urlopen('http://localhost:8002/health', timeout=3)"]
       interval: 15s
       timeout: 5s
       retries: 5
-      start_period: 10s
+      start_period: 20s
 
 volumes:
   pgdata:

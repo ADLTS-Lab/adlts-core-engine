@@ -3,6 +3,7 @@ package booking
 import (
 	"encoding/json"
 	"io"
+	"log"
 	"net/http"
 	"strconv"
 	"time"
@@ -394,6 +395,7 @@ func handleServiceError(w http.ResponseWriter, err error) {
 		ErrMissingSlotID, ErrInvalidSlotTimes, ErrMissingSlotTimes:
 		httpx.Failure(w, http.StatusBadRequest, "INVALID_REQUEST", err.Error(), nil)
 	default:
+		log.Printf("ERROR booking handler: %v", err)
 		httpx.Failure(w, http.StatusInternalServerError, "SERVER_ERROR", "internal error", nil)
 	}
 }

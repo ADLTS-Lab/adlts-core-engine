@@ -1,0 +1,1 @@
+"""ADLTS Driving Test Service — lane detection, scoring, and MinIO recording."""

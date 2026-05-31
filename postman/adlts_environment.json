@@ -1,0 +1,17 @@
+{
+  "id": "adlts-env-local",
+  "name": "ADLTS Local",
+  "values": [
+    { "key": "base_url", "value": "http://localhost:8080", "enabled": true, "type": "default" },
+    { "key": "super_admin_access_token", "value": "", "enabled": true, "type": "secret" },
+    { "key": "institute_access_token", "value": "", "enabled": true, "type": "secret" },
+    { "key": "candidate_access_token", "value": "", "enabled": true, "type": "secret" },
+    { "key": "institute_id", "value": "", "enabled": true, "type": "default" },
+    { "key": "invitation_id", "value": "", "enabled": true, "type": "default" },
+    { "key": "invitation_token", "value": "", "enabled": true, "type": "default" },
+    { "key": "booking_id", "value": "", "enabled": true, "type": "default" },
+    { "key": "slot_id", "value": "", "enabled": true, "type": "default" },
+    { "key": "test_id", "value": "", "enabled": true, "type": "default" }
+  ],
+  "_postman_variable_scope": "environment"
+}

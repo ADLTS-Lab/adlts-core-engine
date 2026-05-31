@@ -6,6 +6,14 @@ import (
 	"github.com/google/uuid"
 )
 
+// ── Well-known UUIDs for seed entities (migration 006) ─────────────────────
+var (
+	DefaultTestCenterID = uuid.MustParse("00000000-0000-0000-0000-000000000001")
+	DefaultDeviceID     = uuid.MustParse("00000000-0000-0000-0000-000000000002")
+	DefaultPlanID       = uuid.MustParse("00000000-0000-0000-0000-000000000003")
+	SystemActorID       = uuid.MustParse("00000000-0000-0000-0000-000000000000")
+)
+
 // ── ManeuverType — static enum (not admin-configurable) ─────────────────────
 
 // ManeuverType identifies the kind of driving maneuver being evaluated.

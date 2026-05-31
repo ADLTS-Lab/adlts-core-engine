@@ -145,6 +145,11 @@ func (c *ChapaProvider) ValidateWebhookSignature(payload []byte, signature strin
 }
 
 // generateTxRef produces a unique, traceable transaction reference.
+// Chapa requires tx_ref to be at most 50 characters.
 func generateTxRef(bookingID string) string {
-	return fmt.Sprintf("adlts_booking_%s_%d", bookingID, time.Now().Unix())
+	shortID := bookingID
+	if len(bookingID) > 8 {
+		shortID = bookingID[:8]
+	}
+	return fmt.Sprintf("ab_%s_%d", shortID, time.Now().Unix())
 }

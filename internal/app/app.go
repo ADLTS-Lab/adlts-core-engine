@@ -45,6 +45,7 @@ func Build(cfg config.Config, db *pgxpool.Pool, logger *slog.Logger) *http.Serve
 		mail,
 		cfg.BaseURL,
 		cfg.FrontendBaseURL,
+		cfg.InternalAPIKey,
 	)
 	bookingHandler := booking.NewHandler(bookingSvc, tokens)
 
@@ -79,19 +80,11 @@ func Build(cfg config.Config, db *pgxpool.Pool, logger *slog.Logger) *http.Serve
 		cfg,
 		tokens,
 	)
+	testingHandler.SetHealthChecker(testing_.NewHealthChecker(testing_.NewRepository(db)))
+	testingHandler.SetNarrativeGenerator(testing_.NewNarrativeGenerator(cfg.GeminiAPIKey, cfg.GeminiModel))
 
-	// Wire the orchestrator into the handler (enables admin start/abort)
-	testingHandler.SetOrchestrator(
-		testing_.NewOrchestrator(
-			testing_.NewRepository(db),
-			testing_.NewLaneDetectorClient(cfg.LaneDetectorURL),
-			testing_.NewScoreManeuverClient(cfg.LaneDetectorURL),
-			testing_.NewNarrativeGenerator(cfg.GeminiAPIKey, cfg.GeminiModel),
-			minioClient,
-			testing_.NewIoTClient(""),
-			minioClient,
-		),
-	)
+	// Pass the ADLTS service URL into the handler for test start / webhook calls
+	testingHandler.SetAdltsServiceURL(cfg.AdltsServiceURL)
 
 	// ── Testing Expiry Cron ───────────────────────────────────────────────────
 	testingExpiry := testing_.NewExpiryWorker(testing_.NewRepository(db), 0, 0)

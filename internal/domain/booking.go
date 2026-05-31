@@ -46,6 +46,7 @@ type Booking struct {
 	VerifiedBy           *uuid.UUID    `db:"verified_by"`
 	VerifiedAt           *time.Time    `db:"verified_at"`
 	RejectionReason      *string       `db:"rejection_reason"`
+	TestLevelCode        string        `db:"test_level_code"`
 	ScheduledAt          *time.Time    `db:"scheduled_at"`
 	PaymentRef           *string       `db:"payment_ref"`
 	PaymentStatus        string        `db:"payment_status"`

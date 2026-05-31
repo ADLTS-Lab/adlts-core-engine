@@ -7,8 +7,6 @@ import (
 )
 
 // Mount registers all testing module routes.
-// api  = /api/v1 subrouter
-// root = the root chi router (for /internal/* routes)
 func (h *Handler) Mount(api chi.Router, root chi.Router, tokens *security.Manager) {
 	// ── Public (no auth) ──────────────────────────────────────────────────────
 	api.Get("/test-level-types", h.listTestLevelTypes)
@@ -21,6 +19,8 @@ func (h *Handler) Mount(api chi.Router, root chi.Router, tokens *security.Manage
 		r.Post("/internal/tests", h.createTestInternal)
 		r.Patch("/internal/tests/by-booking/{bookingID}", h.rescheduleTestByBooking)
 		r.Delete("/internal/tests/by-booking/{bookingID}", h.cancelTestByBooking)
+		// Result webhook from ADLTS Python service
+		r.Post("/internal/tests/{id}/result", h.resultWebhook)
 	})
 
 	// ── Admin / SuperAdmin: static maneuver types ─────────────────────────────
@@ -61,11 +61,9 @@ func (h *Handler) Mount(api chi.Router, root chi.Router, tokens *security.Manage
 				r.Post("/", h.createManeuverConfig)
 				r.Post("/reorder", h.reorderManeuverConfigs)
 				r.Route("/{maneuverID}", func(r chi.Router) {
-					// Legacy endpoints (migration-002 schema) — kept for backward compat
 					r.Put("/mask", h.uploadReferenceMask)
 					r.Get("/mask", h.downloadReferenceMask)
 					r.Get("/qr-code", h.downloadManeuverQR)
-					// New endpoints (migration-003 schema)
 					r.Patch("/", h.updateManeuverConfig)
 					r.Delete("/", h.deleteManeuverConfig)
 					r.Get("/qr", h.downloadManeuverQRZip)
@@ -84,88 +82,41 @@ func (h *Handler) Mount(api chi.Router, root chi.Router, tokens *security.Manage
 
 	// ── Tests ─────────────────────────────────────────────────────────────────
 	api.Route("/tests", func(r chi.Router) {
-		// ── Admin CRUD ────────────────────────────────────────────────────────
-		r.With(
-			security.Authenticate(tokens),
-			security.RequireEntities(security.EntityAdmin, security.EntitySuperAdmin),
-		).Get("/", h.listTests)
+		// Admin CRUD
+		r.With(security.Authenticate(tokens), security.RequireEntities(security.EntityAdmin, security.EntitySuperAdmin)).Get("/", h.listTests)
+		r.With(security.Authenticate(tokens), security.RequireEntities(security.EntityAdmin, security.EntitySuperAdmin)).Post("/", h.createTestAdmin)
+		r.With(security.Authenticate(tokens), security.RequireEntities(security.EntityAdmin, security.EntitySuperAdmin)).Get("/{id}", h.getTest)
+		r.With(security.Authenticate(tokens), security.RequireEntities(security.EntityAdmin, security.EntitySuperAdmin)).Patch("/{id}", h.updateTestAdmin)
+		r.With(security.Authenticate(tokens), security.RequireEntities(security.EntityAdmin, security.EntitySuperAdmin)).Delete("/{id}", h.deleteTestAdmin)
 
-		r.With(
-			security.Authenticate(tokens),
-			security.RequireEntities(security.EntityAdmin, security.EntitySuperAdmin),
-		).Post("/", h.createTestAdmin)
-
-		r.With(
-			security.Authenticate(tokens),
-			security.RequireEntities(security.EntityAdmin, security.EntitySuperAdmin),
-		).Get("/{id}", h.getTest)
-
-		r.With(
-			security.Authenticate(tokens),
-			security.RequireEntities(security.EntityAdmin, security.EntitySuperAdmin),
-		).Patch("/{id}", h.updateTestAdmin)
-
-		r.With(
-			security.Authenticate(tokens),
-			security.RequireEntities(security.EntityAdmin, security.EntitySuperAdmin),
-		).Delete("/{id}", h.deleteTestAdmin)
-
-		// ── Any authenticated: status ─────────────────────────────────────────
+		// Status + Start + Abort
 		r.With(security.Authenticate(tokens)).Get("/{id}/status", h.getTestStatus)
+		r.With(security.Authenticate(tokens), security.RequireEntities(security.EntityAdmin, security.EntitySuperAdmin, security.EntityCandidate)).Post("/{id}/start", h.startTest)
+		r.With(security.Authenticate(tokens), security.RequireEntities(security.EntityAdmin, security.EntitySuperAdmin)).Post("/{id}/abort", h.adminAbortTest)
 
-		// ── Admin-only: monitoring + abort ────────────────────────────────────
-		r.With(
-			security.Authenticate(tokens),
-			security.RequireEntities(security.EntityAdmin, security.EntitySuperAdmin),
-		).Get("/{id}/monitor/status", h.monitorStatus)
+		// Monitoring
+		r.With(security.Authenticate(tokens), security.RequireEntities(security.EntityAdmin, security.EntitySuperAdmin)).Get("/{id}/monitor/status", h.monitorStatus)
+		r.With(security.Authenticate(tokens), security.RequireEntities(security.EntityAdmin, security.EntitySuperAdmin)).Get("/{id}/monitor/live", h.monitorLive)
 
-		r.With(
-			security.Authenticate(tokens),
-			security.RequireEntities(security.EntityAdmin, security.EntitySuperAdmin),
-		).Get("/{id}/monitor/live", h.monitorLive)
+		// Candidate flow
+		r.With(security.Authenticate(tokens), security.RequireEntities(security.EntityCandidate)).Get("/my/pending", h.getMyPendingTest)
+		r.With(security.Authenticate(tokens), security.RequireEntities(security.EntityCandidate)).Post("/device-checkin", h.deviceCheckin)
+		r.With(security.Authenticate(tokens), security.RequireEntities(security.EntityCandidate)).Post("/{id}/guidelines/acknowledge", h.acknowledgeGuidelines)
+		r.With(security.Authenticate(tokens), security.RequireEntities(security.EntityCandidate)).Get("/{id}/live", h.getCandidateLive)
 
-		r.With(
-			security.Authenticate(tokens),
-			security.RequireEntities(security.EntityAdmin, security.EntitySuperAdmin),
-		).Post("/{id}/abort", h.adminAbortTest)
-
-		// ── Candidate-only actions ────────────────────────────────────────────
-		r.With(
-			security.Authenticate(tokens),
-			security.RequireEntities(security.EntityCandidate),
-		).Get("/my/pending", h.getMyPendingTest)
-
-		r.With(
-			security.Authenticate(tokens),
-			security.RequireEntities(security.EntityCandidate),
-		).Post("/device-checkin", h.deviceCheckin)
-
-		r.With(
-			security.Authenticate(tokens),
-			security.RequireEntities(security.EntityCandidate),
-		).Post("/{id}/guidelines/acknowledge", h.acknowledgeGuidelines)
-
-		// ── Any authenticated: results ────────────────────────────────────────
+		// Results
 		r.With(security.Authenticate(tokens)).Get("/{id}/result", h.getTestResult)
 
-		// ── Any authenticated: sessions ───────────────────────────────────────
+		// Sessions & Events
 		r.With(security.Authenticate(tokens)).Get("/{id}/sessions", h.listSessions)
 		r.With(security.Authenticate(tokens)).Get("/{id}/sessions/{sessionID}", h.getSession)
 		r.With(security.Authenticate(tokens)).Get("/{id}/sessions/{sessionID}/events", h.listSessionEvents)
 
-		// ── Admin-only: frame analyses (raw sensor data) ──────────────────────
-		r.With(
-			security.Authenticate(tokens),
-			security.RequireEntities(security.EntityAdmin, security.EntitySuperAdmin),
-		).Get("/{id}/sessions/{sessionID}/frames", h.getFrameAnalyses)
+		// Frame analyses (admin only)
+		r.With(security.Authenticate(tokens), security.RequireEntities(security.EntityAdmin, security.EntitySuperAdmin)).Get("/{id}/sessions/{sessionID}/frames", h.getFrameAnalyses)
 
-		// ── Any authenticated: recordings (presigned MinIO URLs) ──────────────
+		// Recordings
 		r.With(security.Authenticate(tokens)).Get("/{id}/recording", h.getTestRecording)
-
-		// ── Admin-only: per-session recording ─────────────────────────────────
-		r.With(
-			security.Authenticate(tokens),
-			security.RequireEntities(security.EntityAdmin, security.EntitySuperAdmin),
-		).Get("/{id}/sessions/{sessionID}/recording", h.getSessionRecording)
+		r.With(security.Authenticate(tokens), security.RequireEntities(security.EntityAdmin, security.EntitySuperAdmin)).Get("/{id}/sessions/{sessionID}/recording", h.getSessionRecording)
 	})
 }
