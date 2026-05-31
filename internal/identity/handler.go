@@ -32,6 +32,7 @@ func (h *Handler) registerCandidate(w http.ResponseWriter, r *http.Request) {
 		httpx.Failure(w, http.StatusBadRequest, "INVALID_BODY", "request body is malformed or has invalid fields", nil)
 		return
 	}
+	req.NormalizeFayidaID()
 	if err := h.svc.RegisterCandidate(r.Context(), req); err != nil {
 		switch {
 		case errors.Is(err, ErrEmailTaken):
@@ -85,6 +86,7 @@ func (h *Handler) acceptInvitation(w http.ResponseWriter, r *http.Request) {
 		httpx.Failure(w, http.StatusBadRequest, "INVALID_BODY", "request body is malformed", nil)
 		return
 	}
+	req.NormalizeFayidaID()
 	resp, err := h.svc.AcceptInvitation(r.Context(), req)
 	if err != nil {
 		switch {
@@ -136,8 +138,18 @@ func (h *Handler) logout(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) refreshToken(w http.ResponseWriter, r *http.Request) {
-	// Refresh token rotation is a future enhancement — return 501 until implemented.
-	httpx.Failure(w, http.StatusNotImplemented, "NOT_IMPLEMENTED", "token refresh is not yet available", nil)
+	var req RefreshRequest
+	if err := httpx.DecodeJSON(r, &req); err != nil {
+		httpx.Failure(w, http.StatusBadRequest, "INVALID_BODY", "request body is malformed", nil)
+		return
+	}
+
+	resp, err := h.svc.RefreshToken(r.Context(), req.RefreshToken)
+	if err != nil {
+		httpx.Failure(w, http.StatusUnauthorized, "INVALID_REFRESH_TOKEN", "refresh token is invalid or expired", nil)
+		return
+	}
+	httpx.Success(w, http.StatusOK, resp, nil)
 }
 
 func (h *Handler) forgotPassword(w http.ResponseWriter, r *http.Request) {
@@ -442,6 +454,36 @@ func (h *Handler) listInstitutes(w http.ResponseWriter, r *http.Request) {
 		out[i] = instituteToResponse(inst)
 	}
 	httpx.Success(w, http.StatusOK, out, &httpx.Meta{Page: page, Total: total, Limit: 20})
+}
+
+func (h *Handler) listActiveInstitutesForCandidates(w http.ResponseWriter, r *http.Request) {
+	q := r.URL.Query()
+	page := pageParam(q.Get("page"))
+	limit := httpx.QueryInt(q, "limit", 20)
+	if limit <= 0 {
+		limit = 20
+	}
+	if limit > 100 {
+		limit = 100
+	}
+
+	insts, total, err := h.svc.repo.ListActiveInstitutes(r.Context(), page, limit)
+	if err != nil {
+		httpx.Failure(w, http.StatusInternalServerError, "DB_ERROR", "could not fetch active institutes", nil)
+		return
+	}
+
+	out := make([]ActiveInstituteResponse, 0, len(insts))
+	for _, inst := range insts {
+		out = append(out, ActiveInstituteResponse{
+			ID:     inst.ID,
+			Name:   inst.Name,
+			Status: string(inst.Status),
+			City:   inst.City,
+			Region: inst.Region,
+		})
+	}
+	httpx.Success(w, http.StatusOK, out, &httpx.Meta{Page: page, Limit: limit, Total: total})
 }
 
 func (h *Handler) instituteMe(w http.ResponseWriter, r *http.Request) {
@@ -887,6 +929,52 @@ func (h *Handler) deleteSuperAdmin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	httpx.Success(w, http.StatusOK, map[string]string{"message": "super admin deleted"}, nil)
+}
+
+func (h *Handler) superAdminDashboard(w http.ResponseWriter, r *http.Request) {
+	metrics, err := h.svc.repo.SuperAdminDashboardMetrics(r.Context())
+	if err != nil {
+		httpx.Failure(w, http.StatusInternalServerError, "DB_ERROR", "could not load dashboard metrics", nil)
+		return
+	}
+	httpx.Success(w, http.StatusOK, SuperAdminDashboardResponse{
+		TotalCandidates:    metrics.TotalCandidates,
+		TotalInstitutes:    metrics.TotalInstitutes,
+		TotalAdmins:        metrics.TotalAdmins,
+		ActiveTests:        metrics.ActiveTests,
+		PendingInvitations: metrics.PendingInvitations,
+		PendingBookings:    metrics.PendingBookings,
+	}, nil)
+}
+
+func (h *Handler) superAdminAudits(w http.ResponseWriter, r *http.Request) {
+	q := r.URL.Query()
+	page := pageParam(q.Get("page"))
+	limit := httpx.QueryInt(q, "limit", 20)
+	if limit <= 0 {
+		limit = 20
+	}
+	if limit > 100 {
+		limit = 100
+	}
+
+	events, total, err := h.svc.repo.SuperAdminAuditEvents(r.Context(), page, limit)
+	if err != nil {
+		httpx.Failure(w, http.StatusInternalServerError, "DB_ERROR", "could not load audit events", nil)
+		return
+	}
+
+	out := make([]SuperAdminAuditEventResponse, 0, len(events))
+	for _, e := range events {
+		out = append(out, SuperAdminAuditEventResponse{
+			EventID:   e.EventID,
+			EventType: e.EventType,
+			Summary:   e.Summary,
+			ActorID:   e.ActorID,
+			CreatedAt: e.CreatedAt,
+		})
+	}
+	httpx.Success(w, http.StatusOK, out, &httpx.Meta{Page: page, Limit: limit, Total: total})
 }
 
 // ─── Invitations ──────────────────────────────────────────────────────────────

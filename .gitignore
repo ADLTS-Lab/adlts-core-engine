@@ -2,5 +2,8 @@
 .env.example
 .venv
 services/lane-detector/models/ultra_falst_lane_detection_tusimple_288x800.onnx
-
+.env.backend.local
+tmp/
+report.pdf
+tmp/api-verification/
 __pycache__

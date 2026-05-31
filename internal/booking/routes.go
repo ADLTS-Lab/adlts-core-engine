@@ -14,7 +14,10 @@ func (h *Handler) Mount(r chi.Router) {
 	instituteOrAdmin := security.RequireEntities(security.EntityInstitute, security.EntityAdmin, security.EntitySuperAdmin)
 
 	// Chapa webhook callback (public)
+	r.Get("/bookings/{id}/payments/callback", h.handleChapaCallback)
 	r.Post("/bookings/{id}/payments/callback", h.handleChapaWebhook)
+	r.Get("/bookings/{id}/payments/callback/", h.handleChapaCallback)
+	r.Post("/bookings/{id}/payments/callback/", h.handleChapaWebhook)
 
 	r.Route("/bookings", func(r chi.Router) {
 		r.Use(auth)
@@ -29,11 +32,12 @@ func (h *Handler) Mount(r chi.Router) {
 			r.With(adminOrSuper).Patch("/schedule", h.scheduleBooking)
 			r.Patch("/reschedule", h.rescheduleBooking)
 
-			r.Route("/payments", func(r chi.Router) {
-				r.With(candidateOnly).Post("/", h.initiatePayment)
-				r.With(candidateOnly).Post("/retry", h.retryPayment)
-				r.Get("/", h.listPayments)
-			})
+			r.With(candidateOnly).Post("/payments", h.initiatePayment)
+			r.With(candidateOnly).Post("/payments/", h.initiatePayment)
+			r.With(candidateOnly).Post("/payments/retry", h.retryPayment)
+			r.With(candidateOnly).Post("/payments/retry/", h.retryPayment)
+			r.Get("/payments", h.listPayments)
+			r.Get("/payments/", h.listPayments)
 		})
 	})
 

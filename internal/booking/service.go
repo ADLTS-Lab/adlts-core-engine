@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"strings"
 	"time"
@@ -26,16 +27,22 @@ type Service struct {
 	baseURL         string
 	frontendBaseURL string
 	internalAPIKey  string
+	httpClient      *http.Client
 }
 
-func NewService(repo *Repository, provider PaymentProvider, mailer *mailer.Mailer, baseURL, frontendBaseURL, internalAPIKey string) *Service {
+func NewService(repo *Repository, provider PaymentProvider, mailer *mailer.Mailer, baseURL, frontendBaseURL string, internalAPIKey ...string) *Service {
+	key := ""
+	if len(internalAPIKey) > 0 {
+		key = internalAPIKey[0]
+	}
 	return &Service{
 		repo:            repo,
 		provider:        provider,
 		mailer:          mailer,
 		baseURL:         baseURL,
 		frontendBaseURL: frontendBaseURL,
-		internalAPIKey:  internalAPIKey,
+		internalAPIKey:  key,
+		httpClient:      &http.Client{Timeout: 15 * time.Second},
 	}
 }
 
@@ -119,6 +126,12 @@ func (s *Service) VerifyBooking(ctx context.Context, auth *security.AuthContext,
 		return domain.Booking{}, ErrBookingNotFound
 	}
 	if b.Status != domain.BookingPendingVerification {
+		if req.Action == "approve" && b.Status == domain.BookingVerified {
+			return b, nil
+		}
+		if req.Action == "reject" && b.Status == domain.BookingRejected {
+			return b, nil
+		}
 		return domain.Booking{}, ErrInvalidStatusForAction
 	}
 
@@ -129,6 +142,9 @@ func (s *Service) VerifyBooking(ctx context.Context, auth *security.AuthContext,
 		fields["verified_at"] = time.Now().UTC()
 	} else {
 		fields["status"] = string(domain.BookingRejected)
+		if strings.TrimSpace(req.RejectionReason) == "" {
+			req.RejectionReason = "Rejected by reviewer"
+		}
 		fields["rejection_reason"] = req.RejectionReason
 	}
 
@@ -294,7 +310,12 @@ func (s *Service) InitiatePayment(ctx context.Context, auth *security.AuthContex
 	if b.CandidateID != auth.SubjectID {
 		return InitiatePaymentResponse{}, ErrForbidden
 	}
-	if b.Status != domain.BookingScheduled {
+	if b.PaymentStatus == "paid" {
+		return InitiatePaymentResponse{}, ErrAlreadyProcessed
+	}
+	if b.Status != domain.BookingVerified &&
+		b.Status != domain.BookingScheduled &&
+		b.Status != domain.BookingPaymentFailed {
 		return InitiatePaymentResponse{}, ErrInvalidStatusForAction
 	}
 
@@ -318,21 +339,6 @@ func (s *Service) InitiatePayment(ctx context.Context, auth *security.AuthContex
 	callbackURL := fmt.Sprintf("%s/api/v1/bookings/%s/payments/callback", base, bookingID)
 	returnURL := fmt.Sprintf("%s/bookings/%s/payment/success", front, bookingID)
 
-	result, err := s.provider.InitiatePayment(ctx, PaymentInitRequest{
-		TxRef:       txRef,
-		AmountCents: req.AmountCents,
-		Currency:    req.Currency,
-		Email:       contact.Email,
-		FirstName:   contact.FirstName,
-		LastName:    contact.LastName,
-		Phone:       contact.Phone,
-		CallbackURL: callbackURL,
-		ReturnURL:   returnURL,
-	})
-	if err != nil {
-		return InitiatePaymentResponse{}, fmt.Errorf("initiate payment: %w", err)
-	}
-
 	payment, err := s.repo.CreatePayment(ctx, domain.Payment{
 		BookingID:     bookingID,
 		AmountCents:   req.AmountCents,
@@ -352,7 +358,28 @@ func (s *Service) InitiatePayment(ctx context.Context, auth *security.AuthContex
 		"payment_amount_cents": req.AmountCents,
 		"payment_attempts":     attemptNumber,
 	}, auth.SubjectID); err != nil {
+		_ = s.repo.UpdatePaymentFields(ctx, payment.ID, map[string]any{"status": "failed"})
 		return InitiatePaymentResponse{}, err
+	}
+
+	result, err := s.provider.InitiatePayment(ctx, PaymentInitRequest{
+		TxRef:       txRef,
+		AmountCents: req.AmountCents,
+		Currency:    req.Currency,
+		Email:       contact.Email,
+		FirstName:   contact.FirstName,
+		LastName:    contact.LastName,
+		Phone:       contact.Phone,
+		CallbackURL: callbackURL,
+		ReturnURL:   returnURL,
+	})
+	if err != nil {
+		_ = s.repo.UpdatePaymentFields(ctx, payment.ID, map[string]any{"status": "failed"})
+		_ = s.repo.UpdateBookingFields(ctx, bookingID, map[string]any{
+			"status":         string(domain.BookingPaymentFailed),
+			"payment_status": "failed",
+		}, auth.SubjectID)
+		return InitiatePaymentResponse{}, fmt.Errorf("%w: initiate payment: %v", ErrPaymentProvider, err)
 	}
 
 	return InitiatePaymentResponse{
@@ -362,73 +389,109 @@ func (s *Service) InitiatePayment(ctx context.Context, auth *security.AuthContex
 	}, nil
 }
 
-func (s *Service) HandleChapaWebhook(ctx context.Context, txRef string) error {
+func (s *Service) HandleChapaTransaction(ctx context.Context, bookingID uuid.UUID, txRef string) error {
+	txRef = strings.TrimSpace(txRef)
+	if txRef == "" {
+		return ErrPaymentNotFound
+	}
+
 	payment, err := s.repo.PaymentByProviderRef(ctx, txRef)
 	if err != nil {
 		return ErrPaymentNotFound
 	}
-
-	if payment.Status == "success" || payment.Status == "failed" {
-		return nil
+	if payment.BookingID != bookingID {
+		return ErrPaymentNotFound
+	}
+	if payment.Status == "success" {
+		return s.confirmPayment(ctx, payment, txRef)
 	}
 
 	verified, err := s.provider.VerifyTransaction(ctx, txRef)
 	if err != nil {
-		return fmt.Errorf("verify transaction: %w", err)
+		return fmt.Errorf("%w: verify transaction: %v", ErrPaymentProvider, err)
+	}
+	if !strings.EqualFold(verified.TxRef, txRef) {
+		return ErrPaymentVerificationMismatch
+	}
+	if verified.Currency != "" && !strings.EqualFold(verified.Currency, payment.Currency) {
+		return ErrPaymentVerificationMismatch
+	}
+	if verified.AmountCents > 0 && verified.AmountCents != payment.AmountCents {
+		return ErrPaymentVerificationMismatch
 	}
 
-	if verified.Status == "success" {
-		_ = s.repo.UpdatePaymentFields(ctx, payment.ID, map[string]any{"status": "success"})
-		_ = s.repo.UpdateBookingFields(ctx, payment.BookingID, map[string]any{
-			"status":         string(domain.BookingConfirmed),
-			"payment_status": "paid",
-			"payment_ref":    txRef,
-		}, uuid.Nil)
-		
-		// Trigger test creation in testing core
-		if err := s.triggerTestCreation(ctx, payment.BookingID); err != nil {
-			// Rollback to payment failed if test creation somehow fails to prevent dangling states
-			_ = s.repo.UpdateBookingFields(ctx, payment.BookingID, map[string]any{
-				"status":         string(domain.BookingPaymentFailed),
-				"payment_status": "failed",
-			}, uuid.Nil)
-			_ = s.repo.UpdatePaymentFields(ctx, payment.ID, map[string]any{"status": "failed"})
-			return fmt.Errorf("booking.triggerTestCreation booking=%s: %w", payment.BookingID, err)
-		}
-		
+	switch normalizeChapaStatus(verified.Status) {
+	case "success":
+		return s.confirmPayment(ctx, payment, txRef)
+	case "failed":
+		return s.failPayment(ctx, payment)
+	case "pending":
+		return s.keepPaymentPending(ctx, payment)
+	default:
 		return nil
 	}
+}
 
-	_ = s.repo.UpdatePaymentFields(ctx, payment.ID, map[string]any{"status": "failed"})
-	_ = s.repo.UpdateBookingFields(ctx, payment.BookingID, map[string]any{
-		"status":         string(domain.BookingPaymentFailed),
-		"payment_status": "failed",
-	}, uuid.Nil)
-
+func (s *Service) confirmPayment(ctx context.Context, payment domain.Payment, txRef string) error {
+	if payment.Status != "success" {
+		if err := s.repo.UpdatePaymentFields(ctx, payment.ID, map[string]any{"status": "success"}); err != nil {
+			return err
+		}
+	}
+	if err := s.repo.UpdateBookingFields(ctx, payment.BookingID, map[string]any{
+		"status":         string(domain.BookingConfirmed),
+		"payment_status": "paid",
+		"payment_ref":    txRef,
+	}, uuid.Nil); err != nil {
+		return err
+	}
+	if err := s.triggerTestCreation(ctx, payment.BookingID); err != nil {
+		return fmt.Errorf("booking.triggerTestCreation booking=%s: %w", payment.BookingID, err)
+	}
 	return nil
 }
 
+func (s *Service) failPayment(ctx context.Context, payment domain.Payment) error {
+	if err := s.repo.UpdatePaymentFields(ctx, payment.ID, map[string]any{"status": "failed"}); err != nil {
+		return err
+	}
+	return s.repo.UpdateBookingFields(ctx, payment.BookingID, map[string]any{
+		"status":         string(domain.BookingPaymentFailed),
+		"payment_status": "failed",
+	}, uuid.Nil)
+}
+
+func (s *Service) keepPaymentPending(ctx context.Context, payment domain.Payment) error {
+	if payment.Status != "pending" {
+		if err := s.repo.UpdatePaymentFields(ctx, payment.ID, map[string]any{"status": "pending"}); err != nil {
+			return err
+		}
+	}
+	return s.repo.UpdateBookingFields(ctx, payment.BookingID, map[string]any{
+		"status":         string(domain.BookingPaymentPending),
+		"payment_status": "pending",
+	}, uuid.Nil)
+}
+
 func (s *Service) triggerTestCreation(ctx context.Context, bookingID uuid.UUID) error {
-	b, err := s.repo.BookingByID(ctx, bookingID)
+	if strings.TrimSpace(s.internalAPIKey) == "" {
+		return nil
+	}
+
+	details, err := s.repo.TestCreationDetails(ctx, bookingID)
 	if err != nil {
 		return err
 	}
 
-	levelCode := b.TestLevelCode
-	if levelCode == "" {
-		levelCode = "class_b"
-	}
-
 	payload := map[string]string{
-		"booking_id":      b.ID.String(),
-		"candidate_id":    b.CandidateID.String(),
-		"test_center_id":  b.InstituteID.String(),
-		"test_level_code": levelCode,
+		"booking_id":      details.BookingID.String(),
+		"candidate_id":    details.CandidateID.String(),
+		"test_center_id":  details.TestCenterID.String(),
+		"test_level_code": details.TestLevelCode,
 	}
 	body, _ := json.Marshal(payload)
 
 	testingURL := strings.TrimRight(s.baseURL, "/") + "/internal/tests"
-
 	req, err := http.NewRequestWithContext(ctx, "POST", testingURL, bytes.NewBuffer(body))
 	if err != nil {
 		return err
@@ -438,16 +501,19 @@ func (s *Service) triggerTestCreation(ctx context.Context, bookingID uuid.UUID) 
 		req.Header.Set("X-Internal-Token", s.internalAPIKey)
 	}
 
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := s.httpClient.Do(req)
 	if err != nil {
 		return err
 	}
 	defer resp.Body.Close()
 
-	if resp.StatusCode != http.StatusCreated {
-		return fmt.Errorf("testing module returned %d", resp.StatusCode)
+	if resp.StatusCode == http.StatusConflict {
+		return nil
 	}
-
+	if resp.StatusCode != http.StatusCreated {
+		b, _ := io.ReadAll(resp.Body)
+		return fmt.Errorf("testing module returned %d: %s", resp.StatusCode, string(b))
+	}
 	var responseData struct {
 		Data struct {
 			TestID string `json:"id"`
@@ -479,9 +545,11 @@ func (s *Service) RetryPayment(ctx context.Context, auth *security.AuthContext, 
 		return InitiatePaymentResponse{}, ErrMaxPaymentAttempts
 	}
 
-	_ = s.repo.UpdateBookingFields(ctx, bookingID, map[string]any{
+	if err := s.repo.UpdateBookingFields(ctx, bookingID, map[string]any{
 		"status": string(domain.BookingScheduled),
-	}, auth.SubjectID)
+	}, auth.SubjectID); err != nil {
+		return InitiatePaymentResponse{}, err
+	}
 
 	return s.InitiatePayment(ctx, auth, bookingID, req)
 }
@@ -521,12 +589,19 @@ func (s *Service) CreateSlot(ctx context.Context, auth *security.AuthContext, re
 		return domain.Slot{}, ErrInstituteNotFound
 	}
 
+	var testCenterID *uuid.UUID
+	if auth.TestCenterID != nil {
+		tc := *auth.TestCenterID
+		testCenterID = &tc
+	}
+
 	return s.repo.CreateSlot(ctx, domain.Slot{
-		InstituteID: instituteID,
-		StartsAt:    req.StartsAt,
-		EndsAt:      req.EndsAt,
-		Capacity:    req.Capacity,
-		BookedCount: 0,
+		InstituteID:  instituteID,
+		TestCenterID: testCenterID,
+		StartsAt:     req.StartsAt,
+		EndsAt:       req.EndsAt,
+		Capacity:     req.Capacity,
+		BookedCount:  0,
 	}, auth.SubjectID)
 }
 
@@ -558,4 +633,20 @@ func (s *Service) authorizeBookingAccess(auth *security.AuthContext, b domain.Bo
 		return ErrForbidden
 	}
 	return nil
+}
+
+func normalizeChapaStatus(status string) string {
+	status = strings.ToLower(strings.TrimSpace(status))
+	switch {
+	case status == "success" || status == "successful":
+		return "success"
+	case status == "pending":
+		return "pending"
+	case status == "failed" || status == "cancelled" || status == "canceled" ||
+		status == "failed/cancelled" || status == "failed/canceled" ||
+		status == "reversed" || status == "refunded":
+		return "failed"
+	default:
+		return status
+	}
 }

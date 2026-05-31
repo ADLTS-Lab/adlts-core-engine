@@ -14,6 +14,7 @@ type InstituteVerification struct {
 	ExpiresAt   time.Time `db:"expires_at"` // not permanent
 	Audit
 }
+
 // -------------------------------------------------------
 // Booking status lifecycle
 // drafted -> pending_verification -> verified -> scheduled
@@ -35,10 +36,16 @@ const (
 	BookingArchived            BookingStatus = "archived"
 	BookingCancelled           BookingStatus = "cancelled"
 )
+
 type Booking struct {
 	ID                   uuid.UUID     `db:"id"`
 	CandidateID          uuid.UUID     `db:"candidate_id"`
 	InstituteID          uuid.UUID     `db:"institute_id"`
+	CandidateName        *string       `db:"candidate_name"`
+	CandidateEmail       *string       `db:"candidate_email"`
+	CandidatePhone       *string       `db:"candidate_phone"`
+	CandidateFayidaID    *string       `db:"candidate_fayida_id"`
+	InstituteName        *string       `db:"institute_name"`
 	TestID               *uuid.UUID    `db:"test_id"`
 	SlotID               *uuid.UUID    `db:"slot_id"`
 	Status               BookingStatus `db:"status"`
@@ -58,15 +65,16 @@ type Booking struct {
 }
 
 type Slot struct {
-	ID          uuid.UUID  `db:"id"`
-	InstituteID uuid.UUID  `db:"institute_id"`
-	TestID      *uuid.UUID `db:"test_id"`
-	StartsAt    time.Time  `db:"starts_at"`
-	EndsAt      time.Time  `db:"ends_at"`
-	Capacity    int        `db:"capacity"`
-	BookedCount int        `db:"booked_count"`
-	CreatedAt   time.Time  `db:"created_at"`
-	UpdatedAt   time.Time  `db:"updated_at"`
+	ID           uuid.UUID  `db:"id"`
+	InstituteID  uuid.UUID  `db:"institute_id"`
+	TestCenterID *uuid.UUID `db:"test_center_id"`
+	TestID       *uuid.UUID `db:"test_id"`
+	StartsAt     time.Time  `db:"starts_at"`
+	EndsAt       time.Time  `db:"ends_at"`
+	Capacity     int        `db:"capacity"`
+	BookedCount  int        `db:"booked_count"`
+	CreatedAt    time.Time  `db:"created_at"`
+	UpdatedAt    time.Time  `db:"updated_at"`
 }
 type Payment struct {
 	ID            uuid.UUID `db:"id"`

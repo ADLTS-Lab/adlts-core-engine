@@ -512,6 +512,76 @@ func (r *Repository) MyPendingTest(ctx context.Context, candidateID uuid.UUID) (
 	return t, err
 }
 
+func (r *Repository) ListMyTests(ctx context.Context, candidateID uuid.UUID, statusFilter string, page, limit int) ([]*domain.Test, int, error) {
+	if page < 1 {
+		page = 1
+	}
+	if limit <= 0 {
+		limit = 20
+	}
+	if limit > 100 {
+		limit = 100
+	}
+	offset := (page - 1) * limit
+
+	args := []any{candidateID}
+	where := `WHERE candidate_id=$1`
+	i := 2
+	if statusFilter != "" {
+		where += fmt.Sprintf(" AND status=$%d", i)
+		args = append(args, statusFilter)
+		i++
+	}
+
+	countQ := fmt.Sprintf(`SELECT COUNT(*) FROM tests %s`, where)
+	var total int
+	if err := r.db.QueryRow(ctx, countQ, args...).Scan(&total); err != nil {
+		return nil, 0, err
+	}
+
+	args = append(args, limit, offset)
+	q := fmt.Sprintf(
+		`SELECT `+testCols+` FROM tests %s ORDER BY created_at DESC LIMIT $%d OFFSET $%d`,
+		where, i, i+1,
+	)
+	rows, err := r.db.Query(ctx, q, args...)
+	if err != nil {
+		return nil, 0, err
+	}
+	defer rows.Close()
+
+	var out []*domain.Test
+	for rows.Next() {
+		t, err := scanTest(rows)
+		if err != nil {
+			return nil, 0, err
+		}
+		out = append(out, t)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, 0, err
+	}
+	return out, total, nil
+}
+
+func (r *Repository) MyTestStats(ctx context.Context, candidateID uuid.UUID) (total, passed, failed, pending int, err error) {
+	err = r.db.QueryRow(ctx, `
+		SELECT
+			COUNT(*)::int AS total,
+			COUNT(*) FILTER (WHERE status='completed' AND passed=true)::int AS passed,
+			COUNT(*) FILTER (
+				WHERE (status='completed' AND COALESCE(passed,false)=false)
+				   OR status IN ('aborted','expired')
+			)::int AS failed,
+			COUNT(*) FILTER (
+				WHERE status IN ('pending','ready','guidelines','acknowledged','iot_health','running','finishing')
+			)::int AS pending
+		FROM tests
+		WHERE candidate_id=$1
+	`, candidateID).Scan(&total, &passed, &failed, &pending)
+	return
+}
+
 // UpdateTestStatus sets a single status + timestamp column atomically.
 func (r *Repository) UpdateTestStatus(ctx context.Context, id uuid.UUID, status domain.TestStatus, tsField string, actorID uuid.UUID) error {
 	q := fmt.Sprintf(
@@ -1145,57 +1215,75 @@ func (r *Repository) SetVideoKey(ctx context.Context, testID uuid.UUID, key stri
 
 // ── Tests — admin listing (Phase 4) ────────────────────────────────────────────
 
-// ListTests returns paginated tests for a test center with optional filters.
+// ListTests returns paginated tests with optional filters.
 // statusFilter = "" disables status filtering.
 // candidateID = uuid.Nil disables candidate filtering.
-func (r *Repository) ListTests(ctx context.Context, centerID uuid.UUID, statusFilter string, candidateID uuid.UUID, page int) ([]*domain.Test, error) {
-	const pageSize = 20
+// centerID = uuid.Nil disables center filtering (used by super admin).
+func (r *Repository) ListTests(ctx context.Context, centerID uuid.UUID, statusFilter string, candidateID uuid.UUID, page, limit int) ([]*domain.Test, int, error) {
 	if page < 1 {
 		page = 1
 	}
-	offset := (page - 1) * pageSize
+	if limit <= 0 {
+		limit = 20
+	}
+	if limit > 100 {
+		limit = 100
+	}
+	offset := (page - 1) * limit
 
-	var args []any
-	var clauses []string
+	var (
+		args  []any
+		conds []string
+	)
 	i := 1
 	if centerID != uuid.Nil {
-		clauses = append(clauses, fmt.Sprintf("test_center_id=$%d", i))
+		conds = append(conds, fmt.Sprintf("test_center_id=$%d", i))
 		args = append(args, centerID)
 		i++
 	}
 	if statusFilter != "" {
-		clauses = append(clauses, fmt.Sprintf("status=$%d", i))
+		conds = append(conds, fmt.Sprintf("status=$%d", i))
 		args = append(args, statusFilter)
 		i++
 	}
 	if candidateID != uuid.Nil {
-		clauses = append(clauses, fmt.Sprintf("candidate_id=$%d", i))
+		conds = append(conds, fmt.Sprintf("candidate_id=$%d", i))
 		args = append(args, candidateID)
 		i++
 	}
 	where := ""
-	if len(clauses) > 0 {
-		where = "WHERE " + strings.Join(clauses, " AND ")
+	if len(conds) > 0 {
+		where = "WHERE " + strings.Join(conds, " AND ")
 	}
-	args = append(args, pageSize, offset)
+
+	countQ := fmt.Sprintf(`SELECT COUNT(*) FROM tests %s`, where)
+	var total int
+	if err := r.db.QueryRow(ctx, countQ, args...).Scan(&total); err != nil {
+		return nil, 0, err
+	}
+
+	args = append(args, limit, offset)
 	q := fmt.Sprintf(
 		`SELECT `+testCols+` FROM tests %s ORDER BY created_at DESC LIMIT $%d OFFSET $%d`,
 		where, i, i+1)
 
 	rows, err := r.db.Query(ctx, q, args...)
 	if err != nil {
-		return nil, err
+		return nil, 0, err
 	}
 	defer rows.Close()
 	var tests []*domain.Test
 	for rows.Next() {
 		t, err := scanTest(rows)
 		if err != nil {
-			return nil, err
+			return nil, 0, err
 		}
 		tests = append(tests, t)
 	}
-	return tests, rows.Err()
+	if err := rows.Err(); err != nil {
+		return nil, 0, err
+	}
+	return tests, total, nil
 }
 
 // DeleteTestPlan hard-deletes a draft test plan. The handler must verify the

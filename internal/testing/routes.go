@@ -98,13 +98,31 @@ func (h *Handler) Mount(api chi.Router, root chi.Router, tokens *security.Manage
 		r.With(security.Authenticate(tokens), security.RequireEntities(security.EntityAdmin, security.EntitySuperAdmin)).Get("/{id}/monitor/status", h.monitorStatus)
 		r.With(security.Authenticate(tokens), security.RequireEntities(security.EntityAdmin, security.EntitySuperAdmin)).Get("/{id}/monitor/live", h.monitorLive)
 
-		// Candidate flow
-		r.With(security.Authenticate(tokens), security.RequireEntities(security.EntityCandidate)).Get("/my/pending", h.getMyPendingTest)
-		r.With(security.Authenticate(tokens), security.RequireEntities(security.EntityCandidate)).Post("/device-checkin", h.deviceCheckin)
-		r.With(security.Authenticate(tokens), security.RequireEntities(security.EntityCandidate)).Post("/{id}/guidelines/acknowledge", h.acknowledgeGuidelines)
-		r.With(security.Authenticate(tokens), security.RequireEntities(security.EntityCandidate)).Get("/{id}/live", h.getCandidateLive)
+		// Candidate-only actions
+		r.With(
+			security.Authenticate(tokens),
+			security.RequireEntities(security.EntityCandidate),
+		).Get("/my/pending", h.getMyPendingTest)
+		r.With(
+			security.Authenticate(tokens),
+			security.RequireEntities(security.EntityCandidate),
+		).Get("/my", h.getMyTests)
+		r.With(
+			security.Authenticate(tokens),
+			security.RequireEntities(security.EntityCandidate),
+		).Get("/my/stats", h.getMyTestStats)
 
-		// Results
+		r.With(
+			security.Authenticate(tokens),
+			security.RequireEntities(security.EntityCandidate),
+		).Post("/device-checkin", h.deviceCheckin)
+
+		r.With(
+			security.Authenticate(tokens),
+			security.RequireEntities(security.EntityCandidate),
+		).Post("/{id}/guidelines/acknowledge", h.acknowledgeGuidelines)
+
+		// ── Any authenticated: results ────────────────────────────────────────
 		r.With(security.Authenticate(tokens)).Get("/{id}/result", h.getTestResult)
 
 		// Sessions & Events

@@ -298,6 +298,13 @@ type TestResponse struct {
 	CreatedAt          time.Time  `json:"created_at"`
 }
 
+type MyTestStatsResponse struct {
+	Total   int `json:"total"`
+	Passed  int `json:"passed"`
+	Failed  int `json:"failed"`
+	Pending int `json:"pending"`
+}
+
 // ── Monitor DTOs ──────────────────────────────────────────────────────────────
 
 type MonitorStatusResponse struct {

@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -24,26 +25,46 @@ import (
 )
 
 type fakeProvider struct {
-	verifyStatus string
+	verifyStatus      string
+	verifyAmountCents int
+	verifyCurrency    string
+	initErr           error
 }
 
 func (f *fakeProvider) InitiatePayment(ctx context.Context, req booking.PaymentInitRequest) (booking.PaymentInitResult, error) {
+	if f.initErr != nil {
+		return booking.PaymentInitResult{}, f.initErr
+	}
 	return booking.PaymentInitResult{CheckoutURL: "https://pay.test/checkout", TxRef: req.TxRef}, nil
 }
 
 func (f *fakeProvider) VerifyTransaction(ctx context.Context, txRef string) (booking.PaymentVerifyResult, error) {
-	return booking.PaymentVerifyResult{TxRef: txRef, Status: f.verifyStatus, AmountCents: 10000}, nil
+	amount := f.verifyAmountCents
+	if amount == 0 {
+		amount = 10000
+	}
+	currency := f.verifyCurrency
+	if currency == "" {
+		currency = "ETB"
+	}
+	return booking.PaymentVerifyResult{TxRef: txRef, Status: f.verifyStatus, AmountCents: amount, Currency: currency}, nil
 }
 
-func (f *fakeProvider) ValidateWebhookSignature(payload []byte, signature string) bool {
-	return signature == "valid"
+func (f *fakeProvider) ValidateWebhookSignature(payload []byte, signatures ...string) bool {
+	for _, signature := range signatures {
+		if signature == "valid" {
+			return true
+		}
+	}
+	return false
 }
 
 type BookingTestSuite struct {
 	suite.Suite
-	db     *pgxpool.Pool
-	router chi.Router
-	tokens *security.Manager
+	db       *pgxpool.Pool
+	router   chi.Router
+	tokens   *security.Manager
+	provider *fakeProvider
 
 	candidateID uuid.UUID
 	candidateT  string
@@ -55,7 +76,7 @@ type BookingTestSuite struct {
 func (s *BookingTestSuite) SetupSuite() {
 	dsn := os.Getenv("TEST_DATABASE_URL")
 	if dsn == "" {
-		dsn = "postgres://postgres:password@localhost:5432/adlts_test?sslmode=disable"
+		dsn = "postgres://adlts:adlts@localhost:5432/adlts_test?sslmode=disable"
 	}
 	ctx := context.Background()
 	pool, err := db.Connect(ctx, dsn)
@@ -74,8 +95,9 @@ func (s *BookingTestSuite) SetupSuite() {
 
 	cfg := config.Config{JWTSecret: "test-secret-min-32-chars-long-12345678"}
 	s.tokens = security.NewManager(cfg.JWTSecret)
-	mail := mailer.New("localhost", "1025", "", "", "test@adlts.et", "Test")
-	provider := &fakeProvider{verifyStatus: "success"}
+	mail := mailer.NewDiscard()
+	provider := &fakeProvider{verifyStatus: "success", verifyAmountCents: 10000, verifyCurrency: "ETB"}
+	s.provider = provider
 
 	repo := booking.NewRepository(s.db)
 	svc := booking.NewService(repo, provider, mail, "http://localhost:8080", "http://localhost:3000")
@@ -95,6 +117,10 @@ func (s *BookingTestSuite) TearDownSuite() {
 }
 
 func (s *BookingTestSuite) SetupTest() {
+	s.provider.verifyStatus = "success"
+	s.provider.verifyAmountCents = 10000
+	s.provider.verifyCurrency = "ETB"
+	s.provider.initErr = nil
 	s.cleanDB()
 	s.seedUsers()
 }
@@ -148,16 +174,7 @@ func (s *BookingTestSuite) request(method, path, token string, body any) *httpte
 	return w
 }
 
-func (s *BookingTestSuite) TestCreateBookingAndList() {
-	body := map[string]any{"institute_id": s.instituteID.String()}
-	w := s.request("POST", "/bookings", s.candidateT, body)
-	require.Equal(s.T(), http.StatusCreated, w.Code)
-
-	w = s.request("GET", "/bookings", s.candidateT, nil)
-	require.Equal(s.T(), http.StatusOK, w.Code)
-}
-
-func (s *BookingTestSuite) TestScheduleBookingAndPaymentFlow() {
+func (s *BookingTestSuite) createScheduledBooking() string {
 	body := map[string]any{"institute_id": s.instituteID.String()}
 	w := s.request("POST", "/bookings", s.candidateT, body)
 	require.Equal(s.T(), http.StatusCreated, w.Code)
@@ -182,21 +199,120 @@ func (s *BookingTestSuite) TestScheduleBookingAndPaymentFlow() {
 	w = s.request("PATCH", "/bookings/"+bookingID+"/schedule", s.adminT, map[string]any{"slot_id": slotID})
 	require.Equal(s.T(), http.StatusOK, w.Code)
 
+	return bookingID
+}
+
+func (s *BookingTestSuite) startPayment(bookingID string) string {
 	payBody := map[string]any{"amount_cents": 10000, "currency": "ETB"}
-	w = s.request("POST", "/bookings/"+bookingID+"/payments", s.candidateT, payBody)
+	w := s.request("POST", "/bookings/"+bookingID+"/payments", s.candidateT, payBody)
 	require.Equal(s.T(), http.StatusCreated, w.Code)
 	var payResp map[string]any
 	_ = json.NewDecoder(w.Body).Decode(&payResp)
 	payData := payResp["data"].(map[string]any)
-	txRef := payData["tx_ref"].(string)
+	return payData["tx_ref"].(string)
+}
+
+func (s *BookingTestSuite) bookingData(bookingID string) map[string]any {
+	w := s.request("GET", "/bookings/"+bookingID, s.candidateT, nil)
+	require.Equal(s.T(), http.StatusOK, w.Code)
+	var resp map[string]any
+	_ = json.NewDecoder(w.Body).Decode(&resp)
+	return resp["data"].(map[string]any)
+}
+
+func (s *BookingTestSuite) TestCreateBookingAndList() {
+	body := map[string]any{"institute_id": s.instituteID.String()}
+	w := s.request("POST", "/bookings", s.candidateT, body)
+	require.Equal(s.T(), http.StatusCreated, w.Code)
+
+	w = s.request("GET", "/bookings", s.candidateT, nil)
+	require.Equal(s.T(), http.StatusOK, w.Code)
+}
+
+func (s *BookingTestSuite) TestScheduleBookingAndPaymentFlow() {
+	bookingID := s.createScheduledBooking()
+	txRef := s.startPayment(bookingID)
 
 	payload, _ := json.Marshal(map[string]any{"tx_ref": txRef, "status": "success"})
 	req, _ := http.NewRequest("POST", "/api/v1/bookings/"+bookingID+"/payments/callback", bytes.NewReader(payload))
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("x-chapa-signature", "valid")
-	w = httptest.NewRecorder()
+	w := httptest.NewRecorder()
 	s.router.ServeHTTP(w, req)
 	require.Equal(s.T(), http.StatusOK, w.Code)
+
+	paidData := s.bookingData(bookingID)
+	require.Equal(s.T(), "confirmed", paidData["status"])
+	require.Equal(s.T(), "paid", paidData["payment_status"])
+}
+
+func (s *BookingTestSuite) TestPaymentAcceptsFrontendProviderMetadataPayload() {
+	bookingID := s.createScheduledBooking()
+	payBody := map[string]any{
+		"amount_cents": 10000,
+		"currency":     "ETB",
+		"provider":     "chapa",
+		"metadata": map[string]any{
+			"bookingId":     bookingID,
+			"institutionId": s.instituteID.String(),
+		},
+	}
+
+	w := s.request("POST", "/bookings/"+bookingID+"/payments", s.candidateT, payBody)
+	require.Equal(s.T(), http.StatusCreated, w.Code)
+}
+
+func (s *BookingTestSuite) TestPaymentCanRetryAfterProviderFailure() {
+	bookingID := s.createScheduledBooking()
+	s.provider.initErr = errors.New("provider unavailable")
+
+	payBody := map[string]any{"amount_cents": 10000, "currency": "ETB"}
+	w := s.request("POST", "/bookings/"+bookingID+"/payments", s.candidateT, payBody)
+	require.Equal(s.T(), http.StatusBadGateway, w.Code)
+
+	failedData := s.bookingData(bookingID)
+	require.Equal(s.T(), "payment_failed", failedData["status"])
+	require.Equal(s.T(), "failed", failedData["payment_status"])
+
+	s.provider.initErr = nil
+	w = s.request("POST", "/bookings/"+bookingID+"/payments", s.candidateT, payBody)
+	require.Equal(s.T(), http.StatusCreated, w.Code)
+
+	pendingData := s.bookingData(bookingID)
+	require.Equal(s.T(), "payment_pending", pendingData["status"])
+	require.Equal(s.T(), "pending", pendingData["payment_status"])
+}
+
+func (s *BookingTestSuite) TestChapaGetCallbackConfirmsPayment() {
+	bookingID := s.createScheduledBooking()
+	txRef := s.startPayment(bookingID)
+
+	req, _ := http.NewRequest("GET", "/api/v1/bookings/"+bookingID+"/payments/callback?trx_ref="+txRef+"&status=success", nil)
+	w := httptest.NewRecorder()
+	s.router.ServeHTTP(w, req)
+	require.Equal(s.T(), http.StatusOK, w.Code)
+
+	paidData := s.bookingData(bookingID)
+	require.Equal(s.T(), "confirmed", paidData["status"])
+	require.Equal(s.T(), "paid", paidData["payment_status"])
+}
+
+func (s *BookingTestSuite) TestChapaWebhookVerificationMismatchDoesNotConfirm() {
+	bookingID := s.createScheduledBooking()
+	txRef := s.startPayment(bookingID)
+	s.provider.verifyAmountCents = 9999
+
+	payload, _ := json.Marshal(map[string]any{"tx_ref": txRef, "status": "success"})
+	req, _ := http.NewRequest("POST", "/api/v1/bookings/"+bookingID+"/payments/callback", bytes.NewReader(payload))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("x-chapa-signature", "valid")
+	w := httptest.NewRecorder()
+	s.router.ServeHTTP(w, req)
+	require.Equal(s.T(), http.StatusOK, w.Code)
+
+	data := s.bookingData(bookingID)
+	require.Equal(s.T(), "payment_pending", data["status"])
+	require.Equal(s.T(), "pending", data["payment_status"])
 }
 
 func TestBookingSuite(t *testing.T) {

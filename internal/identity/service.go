@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"math/big"
+	"strings"
 	"time"
 
 	"adlts/internal/domain"
@@ -15,9 +16,8 @@ import (
 	"github.com/google/uuid"
 )
 
-// BaseURL is the public-facing URL used to build links in emails.
-// Set via APP_URL env var; falls back to localhost for dev.
-var BaseURL = "http://localhost:8080"
+// BaseURL is the public-facing frontend URL used to build links in emails.
+var BaseURL = "http://localhost:3000"
 
 type Service struct {
 	repo   *Repository
@@ -56,6 +56,7 @@ func (s *Service) SeedSuperAdmin(ctx context.Context, name, email, password stri
 // ── Candidate registration ────────────────────────────────────────────────────
 
 func (s *Service) RegisterCandidate(ctx context.Context, req RegisterCandidateRequest) error {
+	req.NormalizeFayidaID()
 	if err := req.validate(); err != nil {
 		return err
 	}
@@ -148,6 +149,29 @@ func (s *Service) Login(ctx context.Context, req LoginRequest) (LoginResponse, e
 		}
 	}
 	return LoginResponse{}, ErrInvalidCredentials
+}
+
+func (s *Service) RefreshToken(ctx context.Context, refreshToken string) (LoginResponse, error) {
+	_ = ctx
+	if strings.TrimSpace(refreshToken) == "" {
+		return LoginResponse{}, ErrInvalidRefreshToken
+	}
+
+	claims, err := s.tokens.Parse(refreshToken)
+	if err != nil {
+		return LoginResponse{}, ErrInvalidRefreshToken
+	}
+	if claims.TokenType != security.TokenTypeRefresh {
+		return LoginResponse{}, ErrInvalidRefreshToken
+	}
+	if claims.SubjectID == uuid.Nil || claims.EntityType == "" || claims.Email == "" {
+		return LoginResponse{}, ErrInvalidRefreshToken
+	}
+	if entityTable(claims.EntityType) == "" {
+		return LoginResponse{}, ErrInvalidRefreshToken
+	}
+
+	return s.issueToken(claims.SubjectID, claims.EntityType, claims.Email, claims.TestCenterID)
 }
 
 func (s *Service) loginCandidate(ctx context.Context, req LoginRequest) (LoginResponse, error) {
@@ -251,16 +275,32 @@ func (s *Service) loginAuthority(ctx context.Context, req LoginRequest) (LoginRe
 }
 
 func (s *Service) issueToken(id uuid.UUID, et security.EntityType, email string, centerID *uuid.UUID) (LoginResponse, error) {
-	token, err := s.tokens.Sign(id, et, email, centerID)
+	accessToken, err := s.tokens.SignAccessToken(id, et, email, centerID)
 	if err != nil {
-		return LoginResponse{}, fmt.Errorf("sign token: %w", err)
+		return LoginResponse{}, fmt.Errorf("sign access token: %w", err)
 	}
-	return LoginResponse{AccessToken: token, EntityType: string(et)}, nil
+	refreshToken, err := s.tokens.SignRefreshToken(id, et, email, centerID)
+	if err != nil {
+		return LoginResponse{}, fmt.Errorf("sign refresh token: %w", err)
+	}
+	return LoginResponse{
+		AccessToken:  accessToken,
+		RefreshToken: refreshToken,
+		EntityType:   string(et),
+	}, nil
 }
 
 // ── Password flows ────────────────────────────────────────────────────────────
 
 func (s *Service) ForgotPassword(ctx context.Context, email string) error {
+	exists, err := s.emailRegistered(ctx, email)
+	if err != nil {
+		return err
+	}
+	if !exists {
+		return nil
+	}
+
 	token := uuid.NewString()
 	expiresAt := time.Now().UTC().Add(15 * time.Minute)
 	if err := s.repo.UpsertPasswordResetToken(ctx, email, token, expiresAt); err != nil {
@@ -402,12 +442,15 @@ func (s *Service) CreateInvitation(ctx context.Context, auth *security.AuthConte
 	}
 
 	inviteLink := fmt.Sprintf("%s/accept-invitation?token=%s", BaseURL, inv.Token)
-	_ = s.mail.SendInvitation(inv.Email, inv.EntityType, inviteLink)
+	if err := s.mail.SendInvitation(inv.Email, inv.EntityType, inviteLink); err != nil {
+		return nil, fmt.Errorf("send invitation: %w", err)
+	}
 
 	return inv, nil
 }
 
 func (s *Service) AcceptInvitation(ctx context.Context, req AcceptInvitationRequest) (LoginResponse, error) {
+	req.NormalizeFayidaID()
 	if req.Token == "" || req.Password == "" {
 		return LoginResponse{}, errors.New("token and password are required")
 	}
@@ -445,8 +488,8 @@ func (s *Service) AcceptInvitation(ctx context.Context, req AcceptInvitationRequ
 				Status: domain.UserStatusActive,
 				Audit:  domain.Audit{CreatedAt: now, UpdatedAt: now, CreatedBy: inv.CreatedBy, UpdatedBy: inv.CreatedBy},
 			},
-			Phone: req.Phone,
-			FayidaID: req.FayidaID,
+			Phone:      req.Phone,
+			FayidaID:   req.FayidaID,
 			EmployeeID: req.EmployeeID,
 		}
 		if err := s.repo.CreateExpert(ctx, e); err != nil {
@@ -543,7 +586,9 @@ func (s *Service) ResendInvitation(ctx context.Context, auth *security.AuthConte
 	}
 
 	inviteLink := fmt.Sprintf("%s/accept-invitation?token=%s", BaseURL, newToken)
-	_ = s.mail.SendInvitation(inv.Email, inv.EntityType, inviteLink)
+	if err := s.mail.SendInvitation(inv.Email, inv.EntityType, inviteLink); err != nil {
+		return fmt.Errorf("send invitation: %w", err)
+	}
 
 	return nil
 }
@@ -574,6 +619,45 @@ func (s *Service) sendOTP(ctx context.Context, email string) error {
 		return fmt.Errorf("store otp: %w", err)
 	}
 	return s.mail.SendOTP(email, code)
+}
+
+func (s *Service) emailRegistered(ctx context.Context, email string) (bool, error) {
+	checks := []func(context.Context, string) (bool, error){
+		func(ctx context.Context, email string) (bool, error) {
+			c, err := s.repo.CandidateByEmail(ctx, email)
+			return c != nil, err
+		},
+		func(ctx context.Context, email string) (bool, error) {
+			e, err := s.repo.ExpertByEmail(ctx, email)
+			return e != nil, err
+		},
+		func(ctx context.Context, email string) (bool, error) {
+			a, err := s.repo.AdminByEmail(ctx, email)
+			return a != nil, err
+		},
+		func(ctx context.Context, email string) (bool, error) {
+			sa, err := s.repo.SuperAdminByEmail(ctx, email)
+			return sa != nil, err
+		},
+		func(ctx context.Context, email string) (bool, error) {
+			inst, err := s.repo.InstituteByEmail(ctx, email)
+			return inst != nil, err
+		},
+		func(ctx context.Context, email string) (bool, error) {
+			auth, err := s.repo.AuthorityByEmail(ctx, email)
+			return auth != nil, err
+		},
+	}
+	for _, check := range checks {
+		ok, err := check(ctx, email)
+		if err != nil {
+			return false, err
+		}
+		if ok {
+			return true, nil
+		}
+	}
+	return false, nil
 }
 
 func randomDigits(n int) (string, error) {
@@ -622,6 +706,7 @@ var (
 	ErrInvalidOTP          = errors.New("invalid or expired verification code")
 	ErrInvalidResetToken   = errors.New("invalid or expired reset token")
 	ErrInvalidInviteToken  = errors.New("invalid invitation token")
+	ErrInvalidRefreshToken = errors.New("invalid refresh token")
 	ErrInviteAlreadyUsed   = errors.New("invitation already used")
 	ErrInviteExpired       = errors.New("invitation has expired")
 	ErrForbiddenInviteRole = errors.New("admin can only invite expert or institute")

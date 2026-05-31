@@ -4,6 +4,7 @@ import (
 	"context"
 	"log/slog"
 	"net/http"
+	"strings"
 	"time"
 
 	"adlts/internal/appeal"
@@ -29,8 +30,17 @@ func Build(cfg config.Config, db *pgxpool.Pool, logger *slog.Logger) *http.Serve
 	media.MaxFileSize = cfg.MediaMaxSizeMB * 1024 * 1024
 
 	tokens := security.NewManager(cfg.JWTSecret)
-	mail := mailer.New(cfg.SMTPHost, cfg.SMTPPort, cfg.SMTPUser, cfg.SMTPPassword, cfg.SMTPFrom, cfg.SMTPFromName)
-	identity.BaseURL = cfg.BaseURL
+	mail := mailer.NewSMTP(mailer.Config{
+		Host:       cfg.SMTPHost,
+		Port:       cfg.SMTPPort,
+		User:       cfg.SMTPUser,
+		Password:   cfg.SMTPPassword,
+		From:       cfg.SMTPFrom,
+		FromName:   cfg.SMTPFromName,
+		Encryption: mailer.Encryption(cfg.SMTPEncryption),
+		Timeout:    time.Duration(cfg.SMTPTimeoutSeconds) * time.Second,
+	})
+	identity.BaseURL = cfg.FrontendBaseURL
 	identitySvc := identity.NewService(identity.NewRepository(db), tokens, mail)
 
 	// Seed root super-admin gracefully
@@ -111,12 +121,26 @@ func Build(cfg config.Config, db *pgxpool.Pool, logger *slog.Logger) *http.Serve
 	r.Use(middleware.Recoverer)
 	r.Use(requestLogger(logger))
 	r.Use(middleware.Timeout(30 * time.Second))
-	r.Use(corsMiddleware)
+	r.Use(corsMiddleware(cfg.CORSAllowedOrigins))
 
 	r.Get("/health", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
+		if db == nil {
+			w.WriteHeader(http.StatusServiceUnavailable)
+			_, _ = w.Write([]byte(`{"status":"degraded","db":"error"}`))
+			return
+		}
+
+		ctx, cancel := context.WithTimeout(r.Context(), 2*time.Second)
+		defer cancel()
+		if err := db.Ping(ctx); err != nil {
+			w.WriteHeader(http.StatusServiceUnavailable)
+			_, _ = w.Write([]byte(`{"status":"degraded","db":"error"}`))
+			return
+		}
+
 		w.WriteHeader(http.StatusOK)
-		_, _ = w.Write([]byte(`{"status":"ok"}`))
+		_, _ = w.Write([]byte(`{"status":"ok","db":"ok"}`))
 	})
 
 	// Static media file serving — public, UUID-obscured paths
@@ -156,17 +180,48 @@ func Build(cfg config.Config, db *pgxpool.Pool, logger *slog.Logger) *http.Serve
 	}
 }
 
-func corsMiddleware(next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Access-Control-Allow-Origin", "*")
-		w.Header().Set("Access-Control-Allow-Methods", "GET,POST,PUT,PATCH,DELETE,OPTIONS")
-		w.Header().Set("Access-Control-Allow-Headers", "Content-Type,Authorization,X-Internal-Token,X-Device-Secret")
-		if r.Method == "OPTIONS" {
-			w.WriteHeader(http.StatusNoContent)
-			return
+func corsMiddleware(allowedOrigins []string) func(http.Handler) http.Handler {
+	allowed := make(map[string]struct{}, len(allowedOrigins))
+	for _, origin := range allowedOrigins {
+		o := strings.TrimSpace(origin)
+		if o != "" {
+			allowed[o] = struct{}{}
 		}
-		next.ServeHTTP(w, r)
-	})
+	}
+
+	const allowedMethods = "GET,POST,PATCH,PUT,DELETE,OPTIONS"
+	const allowedHeaders = "Authorization,Content-Type,X-Internal-Token,X-Device-Secret"
+
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			origin := strings.TrimSpace(r.Header.Get("Origin"))
+			originAllowed := false
+			if origin != "" {
+				w.Header().Add("Vary", "Origin")
+				_, originAllowed = allowed[origin]
+				if originAllowed {
+					w.Header().Set("Access-Control-Allow-Origin", origin)
+					w.Header().Set("Access-Control-Allow-Methods", allowedMethods)
+					w.Header().Set("Access-Control-Allow-Headers", allowedHeaders)
+				}
+			}
+
+			if r.Method == http.MethodOptions {
+				if origin != "" && !originAllowed {
+					w.WriteHeader(http.StatusForbidden)
+					return
+				}
+				if origin == "" {
+					w.Header().Set("Access-Control-Allow-Methods", allowedMethods)
+					w.Header().Set("Access-Control-Allow-Headers", allowedHeaders)
+				}
+				w.WriteHeader(http.StatusNoContent)
+				return
+			}
+
+			next.ServeHTTP(w, r)
+		})
+	}
 }
 
 func requestLogger(logger *slog.Logger) func(http.Handler) http.Handler {

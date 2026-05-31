@@ -2,6 +2,7 @@ package booking
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -38,20 +39,21 @@ func (r *Repository) CreateBooking(ctx context.Context, b domain.Booking, create
 			 scheduled_at, payment_ref, payment_status, payment_amount_cents,
 			 payment_attempts, archived_at, created_at, updated_at, created_by, updated_by)
 		VALUES
-			($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20)
-		RETURNING ` + bookingCols
+			($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20)`
 
-	row := r.db.QueryRow(ctx, q,
+	if _, err := r.db.Exec(ctx, q,
 		b.ID, b.CandidateID, b.InstituteID, b.TestID, b.SlotID, b.Status,
 		b.RequiresVerification, b.VerifiedBy, b.VerifiedAt, b.RejectionReason,
 		b.ScheduledAt, b.PaymentRef, b.PaymentStatus, b.PaymentAmountCents,
 		b.PaymentAttempts, b.ArchivedAt, b.CreatedAt, b.UpdatedAt, createdBy, createdBy,
-	)
-	return scanBooking(row)
+	); err != nil {
+		return domain.Booking{}, err
+	}
+	return r.BookingByID(ctx, b.ID)
 }
 
 func (r *Repository) BookingByID(ctx context.Context, id uuid.UUID) (domain.Booking, error) {
-	row := r.db.QueryRow(ctx, `SELECT `+bookingCols+` FROM bookings WHERE id=$1`, id)
+	row := r.db.QueryRow(ctx, bookingDetailQuery(`WHERE b.id=$1`), id)
 	return scanBooking(row)
 }
 
@@ -67,7 +69,7 @@ func (r *Repository) ListBookings(ctx context.Context, f BookingFilter, page int
 	}
 	where, args := buildBookingFilter(f)
 	args = append(args, (page-1)*20)
-	q := fmt.Sprintf(`SELECT %s FROM bookings %s ORDER BY created_at DESC LIMIT 20 OFFSET $%d`, bookingCols, where, len(args))
+	q := fmt.Sprintf(`%s ORDER BY b.created_at DESC LIMIT 20 OFFSET $%d`, bookingDetailQuery(where), len(args))
 	rows, err := r.db.Query(ctx, q, args...)
 	if err != nil {
 		return nil, 0, err
@@ -85,7 +87,7 @@ func (r *Repository) ListBookings(ctx context.Context, f BookingFilter, page int
 
 	countArgs := args[:len(args)-1]
 	var total int
-	_ = r.db.QueryRow(ctx, `SELECT COUNT(*) FROM bookings `+where, countArgs...).Scan(&total)
+	_ = r.db.QueryRow(ctx, `SELECT COUNT(*) FROM bookings b `+where, countArgs...).Scan(&total)
 	return out, total, nil
 }
 
@@ -110,14 +112,14 @@ func (r *Repository) CreateSlot(ctx context.Context, s domain.Slot, createdBy uu
 
 	const q = `
 		INSERT INTO slots
-			(id, institute_id, test_id, starts_at, ends_at, capacity, booked_count,
+			(id, institute_id, test_center_id, test_id, starts_at, ends_at, capacity, booked_count,
 			 start_time, end_time, created_at, updated_at, created_by, updated_by)
 		VALUES
-			($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)
+			($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)
 		RETURNING ` + slotCols
 
 	row := r.db.QueryRow(ctx, q,
-		s.ID, s.InstituteID, s.TestID, s.StartsAt, s.EndsAt, s.Capacity, s.BookedCount,
+		s.ID, s.InstituteID, s.TestCenterID, s.TestID, s.StartsAt, s.EndsAt, s.Capacity, s.BookedCount,
 		s.StartsAt, s.EndsAt, s.CreatedAt, s.UpdatedAt, createdBy, createdBy,
 	)
 	return scanSlot(row)
@@ -250,6 +252,39 @@ func (r *Repository) LatestPaymentAttemptNumber(ctx context.Context, bookingID u
 	return n, err
 }
 
+type TestCreationDetails struct {
+	BookingID     uuid.UUID
+	CandidateID   uuid.UUID
+	TestCenterID  uuid.UUID
+	TestLevelCode string
+}
+
+func (r *Repository) TestCreationDetails(ctx context.Context, bookingID uuid.UUID) (TestCreationDetails, error) {
+	var d TestCreationDetails
+	var testCenterID uuid.NullUUID
+	err := r.db.QueryRow(ctx, `
+		SELECT
+			b.id,
+			b.candidate_id,
+			COALESCE(b.test_center_id, s.test_center_id),
+			COALESCE(NULLIF(b.test_level_code, ''), 'class_b')
+		FROM bookings b
+		LEFT JOIN slots s ON s.id = b.slot_id
+		WHERE b.id = $1
+	`, bookingID).Scan(&d.BookingID, &d.CandidateID, &testCenterID, &d.TestLevelCode)
+	if err != nil {
+		if err == pgx.ErrNoRows {
+			return TestCreationDetails{}, ErrBookingNotFound
+		}
+		return TestCreationDetails{}, err
+	}
+	if !testCenterID.Valid {
+		return TestCreationDetails{}, errors.New("booking test center is not set")
+	}
+	d.TestCenterID = testCenterID.UUID
+	return d, nil
+}
+
 // -------------------------------------------------------
 // Lookup helpers
 // -------------------------------------------------------
@@ -312,7 +347,8 @@ func scanBooking(row scannable) (domain.Booking, error) {
 		&b.Status, &b.RequiresVerification, &b.VerifiedBy, &b.VerifiedAt,
 		&b.RejectionReason, &b.ScheduledAt, &b.PaymentRef, &b.PaymentStatus,
 		&b.PaymentAmountCents, &b.PaymentAttempts, &b.ArchivedAt,
-		&b.CreatedAt, &b.UpdatedAt,
+		&b.CreatedAt, &b.UpdatedAt, &b.CandidateName, &b.CandidateEmail,
+		&b.CandidatePhone, &b.CandidateFayidaID, &b.InstituteName,
 	)
 	if err != nil {
 		if err == pgx.ErrNoRows {
@@ -330,7 +366,7 @@ func scanBookingRow(rows pgx.Rows) (domain.Booking, error) {
 func scanSlot(row scannable) (domain.Slot, error) {
 	var s domain.Slot
 	err := row.Scan(
-		&s.ID, &s.InstituteID, &s.TestID, &s.StartsAt, &s.EndsAt,
+		&s.ID, &s.InstituteID, &s.TestCenterID, &s.TestID, &s.StartsAt, &s.EndsAt,
 		&s.Capacity, &s.BookedCount, &s.CreatedAt, &s.UpdatedAt,
 	)
 	if err != nil {
@@ -392,15 +428,15 @@ func buildBookingFilter(f BookingFilter) (string, []any) {
 	args := []any{}
 	if f.CandidateID != nil {
 		args = append(args, *f.CandidateID)
-		conds = append(conds, fmt.Sprintf("candidate_id=$%d", len(args)))
+		conds = append(conds, fmt.Sprintf("b.candidate_id=$%d", len(args)))
 	}
 	if f.InstituteID != nil {
 		args = append(args, *f.InstituteID)
-		conds = append(conds, fmt.Sprintf("institute_id=$%d", len(args)))
+		conds = append(conds, fmt.Sprintf("b.institute_id=$%d", len(args)))
 	}
 	if f.Status != nil {
 		args = append(args, string(*f.Status))
-		conds = append(conds, fmt.Sprintf("status=$%d", len(args)))
+		conds = append(conds, fmt.Sprintf("b.status=$%d", len(args)))
 	}
 	if len(conds) == 0 {
 		return "", args
@@ -413,7 +449,25 @@ const bookingCols = `id, candidate_id, institute_id, test_id, slot_id, status,
 	payment_ref, payment_status, payment_amount_cents, payment_attempts, archived_at,
 	created_at, updated_at`
 
-const slotCols = `id, institute_id, test_id, starts_at, ends_at, capacity,
+const bookingDetailCols = `b.id, b.candidate_id, b.institute_id, b.test_id, b.slot_id, b.status,
+	b.requires_verification, b.verified_by, b.verified_at, b.rejection_reason, b.scheduled_at,
+	b.payment_ref, b.payment_status, b.payment_amount_cents, b.payment_attempts, b.archived_at,
+	b.created_at, b.updated_at,
+	concat_ws(' ', c.first_name, NULLIF(c.middle_name, ''), c.last_name) AS candidate_name,
+	c.email AS candidate_email,
+	c.phone AS candidate_phone,
+	c.fayida_id AS candidate_fayida_id,
+	i.name AS institute_name`
+
+func bookingDetailQuery(where string) string {
+	return fmt.Sprintf(`SELECT %s
+		FROM bookings b
+		LEFT JOIN candidates c ON c.id = b.candidate_id
+		LEFT JOIN institutes i ON i.id = b.institute_id
+		%s`, bookingDetailCols, where)
+}
+
+const slotCols = `id, institute_id, test_center_id, test_id, starts_at, ends_at, capacity,
 	booked_count, created_at, updated_at`
 
 const paymentCols = `id, booking_id, amount_cents, currency, status, provider,

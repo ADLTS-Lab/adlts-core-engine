@@ -37,11 +37,11 @@ type IdentityTestSuite struct {
 func (s *IdentityTestSuite) SetupSuite() {
 	dsn := os.Getenv("TEST_DATABASE_URL")
 	if dsn == "" {
-		dsn = "postgres://postgres:password@localhost:5432/adlts_test?sslmode=disable"
+		dsn = "postgres://adlts:adlts@localhost:5432/adlts_test?sslmode=disable"
 	}
 	ctx := context.Background()
 	pool, err := db.Connect(ctx, dsn)
-	require.NoError(s.T(), err, "failed to connect to local test postgres. ensure one is running on 5432 with user/pass postgres/postgres or set TEST_DATABASE_URL")
+	require.NoError(s.T(), err, "failed to connect to local test postgres. ensure one is running on 5432 with user/pass adlts/adlts or set TEST_DATABASE_URL")
 
 	s.db = pool
 
@@ -55,9 +55,8 @@ func (s *IdentityTestSuite) SetupSuite() {
 
 	cfg := config.Config{JWTSecret: "test-secret-min-32-chars-long-12345678"}
 	s.tokens = security.NewManager(cfg.JWTSecret)
-	
-	// Mock Mailer
-	mail := mailer.New("localhost", "1025", "", "", "test@adlts.et", "Test")
+
+	mail := mailer.NewDiscard()
 
 	repo := identity.NewRepository(s.db)
 	svc := identity.NewService(repo, s.tokens, mail)
@@ -84,7 +83,7 @@ func (s *IdentityTestSuite) SetupTest() {
 func (s *IdentityTestSuite) cleanDB() {
 	ctx := context.Background()
 	tables := []string{
-		"invitations", "password_reset_tokens", "otp_codes", 
+		"invitations", "password_reset_tokens", "otp_codes",
 		"candidates", "experts", "institutes", "transport_authorities", "admins", "super_admins", "test_centers",
 	}
 	for _, t := range tables {
@@ -266,7 +265,7 @@ func (s *IdentityTestSuite) Test_LoginAndMe() {
 
 	w = s.request("GET", "/admins/me", token, nil)
 	require.Equal(s.T(), http.StatusOK, w.Code)
-	
+
 	var me map[string]interface{}
 	json.NewDecoder(w.Body).Decode(&me)
 	meData := me["data"].(map[string]interface{})
@@ -276,7 +275,7 @@ func (s *IdentityTestSuite) Test_LoginAndMe() {
 func (s *IdentityTestSuite) Test_FailInvalidLogin() {
 	loginBody := map[string]interface{}{
 		"email":    "nonexistent@example.com",
-		"password": "Password123", 
+		"password": "Password123",
 	}
 	w := s.request("POST", "/auth/login", "", loginBody)
 	require.Equal(s.T(), http.StatusUnauthorized, w.Code)

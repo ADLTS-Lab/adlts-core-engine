@@ -36,7 +36,18 @@ go run ./cmd/api
 
 # Server listening on http://localhost:8080
 curl http://localhost:8080/health
+
+# Seed integration data
+DATABASE_URL=$DATABASE_URL go run ./cmd/seed/main.go
 ```
+
+Seeded login accounts:
+- `super@adlts.et` / `SuperAdmin123!`
+- `admin@adlts.et` / `Admin123!`
+- `candidate@test.et` / `Candidate123!`
+- `institute@test.et` / `Institute123!`
+- `expert@test.et` / `Expert123!`
+- `authority@test.et` / `Authority123!`
 
 **Or with Docker:**
 
@@ -121,7 +132,7 @@ docker-compose up -d
 - **HTTP Router**: chi/v5 composable middleware for logging, recovery, timeout enforcement
 - **File Management**: Upload validation, media streaming, byte-range request support
 - **Object Storage**: MinIO S3-compatible API for recordings and analysis artifacts
-- **Email**: SMTP client with asynchronous delivery and template support
+- **Email**: SMTP delivery with TLS/STARTTLS support and text/HTML message bodies
 - **External Services**: Chapa (payments), Gemini (AI summaries), Python CV (video analysis)
 
 ## Configuration
@@ -152,12 +163,17 @@ Optional variables with defaults:
 | `SMTP_USER` | empty | Email server username |
 | `SMTP_PASSWORD` | empty | Email server password |
 | `SMTP_FROM` | noreply@adlts.et | Sender email address |
+| `SMTP_FROM_NAME` | ADLTS | Sender display name |
+| `SMTP_ENCRYPTION` | auto | SMTP encryption mode: `auto`, `starttls`, `tls`, or `none` |
+| `SMTP_TIMEOUT_SECONDS` | 10 | SMTP connection and delivery timeout |
 | `MINIO_ENDPOINT` | localhost:9000 | Object storage endpoint |
 | `MINIO_BUCKET` | recordings | Storage bucket name |
 | `LANE_DETECTOR_URL` | http://localhost:8000 | Python CV service URL |
 | `GEMINI_API_KEY` | empty | AI text generation API key |
 
-Copy `.env.example` and customize for your environment.
+For local development, `docker compose up` starts Mailpit and configures the API to send OTP, password reset, and invitation emails to it. Open `http://localhost:8025` to inspect captured messages.
+
+For production, set `SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, `SMTP_PASSWORD`, `SMTP_FROM`, and the appropriate `SMTP_ENCRYPTION` value for your provider.
 
 ## API Usage
 
@@ -346,6 +362,28 @@ For production, use environment-specific configurations:
 3. Use a managed S3-compatible storage (AWS S3, MinIO enterprise, etc.)
 4. Enable HTTPS with a reverse proxy (Nginx, Caddy)
 5. Monitor logs and metrics via your platform (CloudWatch, DataDog, etc.)
+
+### Render Deployment
+
+If Render logs show `127.0.0.1:5432` or `[::1]:5432` connection refused, the web service is using a local development `DATABASE_URL`. On Render, `localhost` is the API container itself, not your Postgres database.
+
+Set the backend web service environment variable:
+
+```env
+DATABASE_URL=postgresql://USER:PASSWORD@INTERNAL_HOST:5432/DATABASE
+```
+
+Use the **Internal Database URL** from your Render Postgres database when the web service and database are in the same account and region. Remove any `DATABASE_URL=postgres://...@localhost:5432/...` value from the service environment or attached environment groups, then redeploy.
+
+Required Render environment variables include:
+
+```env
+DATABASE_URL=<Render Postgres Internal Database URL>
+JWT_SECRET=<strong production secret>
+BASE_URL=https://<your-backend>.onrender.com
+FRONTEND_BASE_URL=https://<your-frontend-domain>
+CORS_ALLOWED_ORIGINS=https://<your-frontend-domain>
+```
 
 ### Health Checks
 

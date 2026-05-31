@@ -30,8 +30,16 @@ services:
     environment:
       DATABASE_URL: postgres://postgres:password@db:5432/adlts?sslmode=disable
       UPLOADS_DIR: /uploads
-      APP_URL: ${APP_URL:-http://localhost:8080}
+      # Base URL for API and frontend return URL
+      BASE_URL: ${BASE_URL:-http://localhost:8080}
       FRONTEND_BASE_URL: ${FRONTEND_BASE_URL:-http://localhost:3000}
+      # Local SMTP delivery through Mailpit
+      SMTP_HOST: mailpit
+      SMTP_PORT: 1025
+      SMTP_FROM: ${SMTP_FROM:-noreply@adlts.et}
+      SMTP_FROM_NAME: ${SMTP_FROM_NAME:-ADLTS}
+      SMTP_ENCRYPTION: none
+      # Chapa payment
       CHAPA_SECRET_KEY: ${CHAPA_SECRET_KEY:-CHASECK_test_placeholder}
       CHAPA_WEBHOOK_SECRET: ${CHAPA_WEBHOOK_SECRET:-dev_webhook_secret}
       CHAPA_BASE_URL: ${CHAPA_BASE_URL:-https://api.chapa.co/v1}
@@ -45,6 +53,8 @@ services:
     depends_on:
       db:
         condition: service_healthy
+      mailpit:
+        condition: service_started
     healthcheck:
       test: ["CMD-SHELL", "wget -qO- http://localhost:8080/health || exit 1"]
       interval: 15s
@@ -71,6 +81,14 @@ services:
       timeout: 5s
       retries: 5
 
+  # ── Local email capture ─────────────────────────────────────────────────────
+  mailpit:
+    image: axllent/mailpit:latest
+    restart: unless-stopped
+    ports:
+      - "1025:1025"   # SMTP
+      - "8025:8025"   # Web inbox
+
   # ── ADLTS Driving Test Service (Python FastAPI, port 8002) ─────────────────
   adlts-service:
     build:
@@ -94,6 +112,18 @@ services:
       timeout: 5s
       retries: 5
       start_period: 20s
+
+  # ── Lane Detector (Python FastAPI) ───────────────────────────────────────────
+  lane-detector:
+    build:
+      context: ./services/lane-detector
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    ports:
+      - "8001:8001"
+    depends_on:
+      minio:
+        condition: service_started
 
 volumes:
   pgdata:

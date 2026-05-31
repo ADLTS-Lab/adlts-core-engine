@@ -2,6 +2,8 @@ package appeal
 
 import (
 	"net/http"
+	"strconv"
+	"strings"
 	"time"
 
 	"adlts/internal/domain"
@@ -20,7 +22,18 @@ func NewHandler(svc *Service) *Handler {
 	return &Handler{svc: svc}
 }
 
-
+type appealResponse struct {
+	ID          uuid.UUID  `json:"id"`
+	TestID      *uuid.UUID `json:"test_id,omitempty"`
+	SessionID   *uuid.UUID `json:"session_id,omitempty"`
+	CandidateID uuid.UUID  `json:"candidate_id"`
+	ExpertID    *uuid.UUID `json:"expert_id,omitempty"`
+	Reason      string     `json:"reason"`
+	Status      string     `json:"status"`
+	Resolution  *string    `json:"resolution,omitempty"`
+	CreatedAt   time.Time  `json:"created_at"`
+	UpdatedAt   time.Time  `json:"updated_at"`
+}
 
 type createAppealReq struct {
 	TestID    string `json:"test_id"`
@@ -89,10 +102,16 @@ type resolveReq struct {
 }
 
 func parseAppealStatus(s string) (domain.AppealStatus, bool) {
-	switch s {
+	switch strings.TrimSpace(strings.ToLower(s)) {
 	case "accepted":
 		return domain.AppealAccepted, true
 	case "rejected":
+		return domain.AppealRejected, true
+	case "accept":
+		return domain.AppealAccepted, true
+	case "approve":
+		return domain.AppealAccepted, true
+	case "reject":
 		return domain.AppealRejected, true
 	default:
 		return "", false
@@ -144,9 +163,9 @@ func (h *Handler) getAppeal(w http.ResponseWriter, r *http.Request) {
 	var createdBy, updatedBy uuid.UUID
 
 	err = h.svc.repo.db.QueryRow(r.Context(), `
-		SELECT id, test_id, session_id, candidate_id, expert_id, reason, status, resolution, created_at, updated_at, created_by, updated_by
+		SELECT id, session_id, candidate_id, expert_id, reason, status, resolution, created_at, updated_at, created_by, updated_by
 		FROM appeals WHERE id = $1
-	`, appealID).Scan(&a.ID, &a.TestID, &a.SessionID, &a.CandidateID, &expertID, &a.Reason, &a.Status, &resolution, &createdAt, &updatedAt, &createdBy, &updatedBy)
+	`, appealID).Scan(&a.ID, &a.SessionID, &a.CandidateID, &expertID, &a.Reason, &a.Status, &resolution, &createdAt, &updatedAt, &createdBy, &updatedBy)
 	if err != nil {
 		httpx.Failure(w, http.StatusNotFound, "NOT_FOUND", "appeal not found", nil)
 		return
@@ -157,5 +176,74 @@ func (h *Handler) getAppeal(w http.ResponseWriter, r *http.Request) {
 	}
 	a.Audit = domain.Audit{CreatedAt: createdAt, UpdatedAt: updatedAt, CreatedBy: createdBy, UpdatedBy: updatedBy}
 
-	httpx.Success(w, http.StatusOK, a, nil)
+	httpx.Success(w, http.StatusOK, toAppealResponse(a), nil)
+}
+
+func (h *Handler) listAppeals(w http.ResponseWriter, r *http.Request) {
+	q := r.URL.Query()
+	status := q.Get("status")
+	page := 1
+	if raw := q.Get("page"); raw != "" {
+		if parsed := parsePositiveInt(raw, 1); parsed > 0 {
+			page = parsed
+		}
+	}
+	limit := parsePositiveInt(q.Get("limit"), 20)
+	if limit > 100 {
+		limit = 100
+	}
+
+	appeals, total, err := h.svc.repo.ListAppeals(r.Context(), status, page, limit)
+	if err != nil {
+		httpx.Failure(w, http.StatusInternalServerError, "DB_ERROR", "could not list appeals", nil)
+		return
+	}
+
+	out := make([]appealResponse, 0, len(appeals))
+	for _, a := range appeals {
+		out = append(out, toAppealResponse(a))
+	}
+	httpx.Success(w, http.StatusOK, out, &httpx.Meta{Page: page, Limit: limit, Total: total})
+}
+
+func toAppealResponse(a domain.Appeal) appealResponse {
+	var testID *uuid.UUID
+	if a.TestID != uuid.Nil {
+		id := a.TestID
+		testID = &id
+	}
+	var sessionID *uuid.UUID
+	if a.SessionID != uuid.Nil {
+		id := a.SessionID
+		sessionID = &id
+	}
+	var resolution *string
+	if a.Resolution != "" {
+		r := a.Resolution
+		resolution = &r
+	}
+
+	return appealResponse{
+		ID:          a.ID,
+		TestID:      testID,
+		SessionID:   sessionID,
+		CandidateID: a.CandidateID,
+		ExpertID:    a.ExpertID,
+		Reason:      a.Reason,
+		Status:      string(a.Status),
+		Resolution:  resolution,
+		CreatedAt:   a.Audit.CreatedAt,
+		UpdatedAt:   a.Audit.UpdatedAt,
+	}
+}
+
+func parsePositiveInt(raw string, fallback int) int {
+	if raw == "" {
+		return fallback
+	}
+	n, err := strconv.Atoi(raw)
+	if err != nil || n < 1 {
+		return fallback
+	}
+	return n
 }

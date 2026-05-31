@@ -20,6 +20,10 @@ func (h *Handler) Mount(api chi.Router, tokens *security.Manager) {
 		r.With(security.RequireEntities(security.EntityExpert, security.EntityAdmin)).
 			Patch("/appeals/{id}/resolve", h.resolveAppeal)
 
+		// Experts/Admin/SuperAdmin can list appeals (e.g. pending queue)
+		r.With(security.RequireEntities(security.EntityExpert, security.EntityAdmin, security.EntitySuperAdmin)).
+			Get("/appeals", h.listAppeals)
+
 		// Any authenticated user can get appeal by ID
 		r.Get("/appeals/{id}", h.getAppeal)
 	})
