@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"time"
 
+	"adlts/internal/appeal"
 	"adlts/internal/booking"
 	"adlts/internal/identity"
 	"adlts/internal/platform/config"
@@ -13,8 +14,9 @@ import (
 	"adlts/internal/platform/media"
 	minioclient "adlts/internal/platform/minio"
 	"adlts/internal/platform/security"
-	testing_ "adlts/internal/testing"
+	"adlts/internal/recording"
 	"adlts/internal/reporting"
+	testing_ "adlts/internal/testing"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
@@ -45,14 +47,23 @@ func Build(cfg config.Config, db *pgxpool.Pool, logger *slog.Logger) *http.Serve
 		cfg.FrontendBaseURL,
 	)
 	bookingHandler := booking.NewHandler(bookingSvc, tokens)
+
+	// ── Appeal module ─────────────────────────────────────────────────────────
 	appealRepo := appeal.NewRepository(db)
 	appealSvc := appeal.NewService(appealRepo, db)
 	appealHandler := appeal.NewHandler(appealSvc)
-	// Recording (playback-only) handler
+
+	// ── Recording module (playback-only) ──────────────────────────────────────
 	recordingRepo := recording.NewRepository(db)
-	minioClient, _ := recording.NewMinioClientFromEnv()
-	recordingSvc := recording.NewService(recordingRepo, minioClient)
+	// Recording module uses its own lightweight MinIO client read from env.
+	// If env vars are missing it returns ErrMinioNotConfigured and we skip recording.
+	recordingMinioClient, recordingMinioErr := recording.NewMinioClientFromEnv()
+	if recordingMinioErr != nil {
+		logger.Error("recording MinIO not configured — playback disabled", "error", recordingMinioErr)
+	}
+	recordingSvc := recording.NewService(recordingRepo, recordingMinioClient)
 	recordingHandler := recording.NewHandler(recordingSvc)
+
 	// ── Testing Core ──────────────────────────────────────────────────────────
 	minioClient, err := minioclient.New(
 		cfg.MinioEndpoint, cfg.MinioAccessKey, cfg.MinioSecretKey, cfg.MinioBucket, cfg.MinioUseSSL)
@@ -74,22 +85,17 @@ func Build(cfg config.Config, db *pgxpool.Pool, logger *slog.Logger) *http.Serve
 		testing_.NewOrchestrator(
 			testing_.NewRepository(db),
 			testing_.NewLaneDetectorClient(cfg.LaneDetectorURL),
-			testing_.NewScoreManeuverClient(cfg.LaneDetectorURL), // scoreClient
+			testing_.NewScoreManeuverClient(cfg.LaneDetectorURL),
 			testing_.NewNarrativeGenerator(cfg.GeminiAPIKey, cfg.GeminiModel),
 			minioClient,
-			testing_.NewIoTClient(""), // iotClient - stream URL should ideally be updated per test/device, but we pass empty string for now to avoid nil, it seems it gets overridden or handled? Let's check scoring.go orchestrator
-			minioClient,               // minioFull
+			testing_.NewIoTClient(""),
+			minioClient,
 		),
 	)
 
 	// ── Testing Expiry Cron ───────────────────────────────────────────────────
 	testingExpiry := testing_.NewExpiryWorker(testing_.NewRepository(db), 0, 0)
 	go testingExpiry.Start(context.Background())
-	// TODO: bookingHandler  := booking.NewHandler(booking.NewService(booking.NewRepository(db)), tokens)
-	// TODO: sessionHandler  := session.NewHandler(...)
-	// TODO: iotHandler      := iot.NewHandler(...)
-	// TODO: scoringHandler  := scoring.NewHandler(...)
-	// TODO: appealHandler   := appeal.NewHandler(...)
 
 	reportRenderer, err := reporting.NewRenderer()
 	if err != nil {
@@ -98,7 +104,7 @@ func Build(cfg config.Config, db *pgxpool.Pool, logger *slog.Logger) *http.Serve
 	reportingSvc := reporting.NewService(
 		reporting.NewHTTPTestingCoreClient(cfg.TestingCoreBaseURL, cfg.TestingCoreToken),
 		reporting.NewHTTPIdentityClient(cfg.IdentityBaseURL, cfg.IdentityToken),
-		reporting.NewHTTPAnthropicClient(cfg.AnthropicAPIKey, cfg.AnthropicModel),
+		reporting.NewHTTPGeminiClient(cfg.GeminiAPIKey, cfg.GeminiModel),
 		reportRenderer,
 		cfg.ReportOutputDir,
 		logger,
@@ -126,17 +132,26 @@ func Build(cfg config.Config, db *pgxpool.Pool, logger *slog.Logger) *http.Serve
 	r.Route("/api/v1", func(api chi.Router) {
 		identityHandler.Mount(api)
 		bookingHandler.Mount(api)
+
+		// Testing Core: public + internal + authenticated routes (3-param Mount)
+		testingHandler.Mount(api, r, tokens)
+
+		// Appeal: routes, auth, and roles managed inside the module's Mount
+		appealHandler.Mount(api, tokens)
+
+		// Recording playback: JWT required
+		api.Group(func(sub chi.Router) {
+			sub.Use(security.Authenticate(tokens))
+			recordingHandler.Mount(sub)
+		})
+
+		// Reports: Admin/SuperAdmin/Institute/Expert only
 		api.With(
 			security.Authenticate(tokens),
 			security.RequireEntities(security.EntityAdmin, security.EntitySuperAdmin, security.EntityInstitute, security.EntityExpert),
 		).Route("/reports", func(r chi.Router) {
 			reportingHandler.Mount(r)
 		})
-		// bookingHandler.Mount(api)
-		// sessionHandler.Mount(api)
-		// iotHandler.Mount(api)
-		// scoringHandler.Mount(api)
-		// appealHandler.Mount(api)
 	})
 
 	return &http.Server{

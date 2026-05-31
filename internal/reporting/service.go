@@ -13,7 +13,7 @@ import (
 type Service struct {
 	testingCore TestingCoreClient
 	identity    IdentityClient
-	anthropic   AnthropicClient
+	geminiLLM   GeminiClient
 	analytics   *AnalyticsEngine
 	renderer    *Renderer
 	outputDir   string
@@ -26,7 +26,7 @@ type Logger interface {
 	Error(msg string, args ...any)
 }
 
-func NewService(testingCore TestingCoreClient, identity IdentityClient, anthropic AnthropicClient, renderer *Renderer, outputDir string, logger Logger) *Service {
+func NewService(testingCore TestingCoreClient, identity IdentityClient, geminiLLM GeminiClient, renderer *Renderer, outputDir string, logger Logger) *Service {
 	if renderer == nil {
 		renderer, _ = NewRenderer()
 	}
@@ -36,7 +36,7 @@ func NewService(testingCore TestingCoreClient, identity IdentityClient, anthropi
 	return &Service{
 		testingCore: testingCore,
 		identity:    identity,
-		anthropic:   anthropic,
+		geminiLLM:   geminiLLM,
 		analytics:   NewAnalyticsEngine(),
 		renderer:    renderer,
 		outputDir:   outputDir,
@@ -105,7 +105,7 @@ func (s *Service) generate(ctx context.Context, testID string) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	narrative, err := s.anthropic.GenerateNarrative(ctx, analytics)
+	narrative, err := s.geminiLLM.GenerateNarrative(ctx, analytics)
 	if err != nil {
 		return nil, err
 	}

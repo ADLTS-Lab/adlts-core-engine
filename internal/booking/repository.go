@@ -285,6 +285,18 @@ func (r *Repository) InstituteExists(ctx context.Context, id uuid.UUID) (bool, e
 	return exists, err
 }
 
+func (r *Repository) CandidateStatusByID(ctx context.Context, id uuid.UUID) (string, error) {
+	var status string
+	err := r.db.QueryRow(ctx, `SELECT status FROM candidates WHERE id=$1`, id).Scan(&status)
+	if err != nil {
+		if err == pgx.ErrNoRows {
+			return "", ErrCandidateNotFound
+		}
+		return "", err
+	}
+	return status, nil
+}
+
 // -------------------------------------------------------
 // Shared helpers
 // -------------------------------------------------------

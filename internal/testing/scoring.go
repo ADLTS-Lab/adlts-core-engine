@@ -346,6 +346,11 @@ func (e *ScoringEngine) FinalizeTest(
 	_ = e.repo.InsertTestResult(ctx, tr)
 	_ = e.repo.CompleteTest(ctx, testID, finalScore, passed, actorID)
 
+	// Open appeal window for 72 hours
+	_ = e.repo.UpdateTestFields(ctx, testID, map[string]any{
+		"appeal_window_closes_at": time.Now().Add(72 * time.Hour),
+	}, actorID)
+
 	// Fire narrative generation asynchronously — must not block or fail the test
 	if narrative != nil {
 		go func() {

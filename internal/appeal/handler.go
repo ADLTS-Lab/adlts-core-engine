@@ -20,11 +20,7 @@ func NewHandler(svc *Service) *Handler {
 	return &Handler{svc: svc}
 }
 
-func (h *Handler) Mount(api chi.Router) {
-	api.Get("/appeals/{id}", h.getAppeal)
-	api.Post("/appeals", h.createAppeal)
-	api.Patch("/appeals/{id}/resolve", h.resolveAppeal)
-}
+
 
 type createAppealReq struct {
 	TestID    string `json:"test_id"`

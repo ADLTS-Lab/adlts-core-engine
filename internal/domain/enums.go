@@ -25,17 +25,7 @@ const (
 	GenderFemale Gender = "female"
 )
 
-type SessionStatus string
 
-const (
-	SessionScheduled      SessionStatus = "scheduled"
-	SessionInitiating     SessionStatus = "initiating"
-	SessionActive         SessionStatus = "active"
-	SessionCompleted      SessionStatus = "completed"
-	SessionReviewRequired SessionStatus = "review_required"
-	SessionFinalized      SessionStatus = "finalized"
-	SessionAborted        SessionStatus = "aborted"
-)
 
 type AppealStatus string
 
@@ -55,10 +45,4 @@ const (
 	CmdAbort         DeviceCommand = "abort"
 )
 
-type DeviceStatus string
 
-const (
-	DeviceOnline    DeviceStatus = "online"
-	DeviceOffline   DeviceStatus = "offline"
-	DeviceStreaming DeviceStatus = "streaming"
-)

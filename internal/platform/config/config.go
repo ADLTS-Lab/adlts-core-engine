@@ -15,8 +15,6 @@ type Config struct {
 	TestingCoreToken string
 	IdentityBaseURL string
 	IdentityToken string
-	AnthropicAPIKey string
-	AnthropicModel string
 	ReportOutputDir string
 
 	SuperAdminName     string
@@ -51,6 +49,7 @@ type Config struct {
 
 	BookingWindowHours         int // ±window for device checkin vs scheduled_at
 	InstituteResultDelayHours  int // delay before institute can see result
+	BaseURL                    string // public-facing base URL of this server
 }
 
 func Load() Config {
@@ -63,8 +62,6 @@ func Load() Config {
 		TestingCoreToken: getEnv("TESTING_CORE_TOKEN", ""),
 		IdentityBaseURL: getEnv("IDENTITY_BASE_URL", "https://api.adlts.et/api/v1"),
 		IdentityToken: getEnv("IDENTITY_TOKEN", ""),
-		AnthropicAPIKey: getEnv("ANTHROPIC_API_KEY", ""),
-		AnthropicModel: getEnv("ANTHROPIC_MODEL", "claude-3-5-sonnet-latest"),
 		ReportOutputDir: getEnv("REPORT_OUTPUT_DIR", "../generated-reports"),
 
 		SuperAdminName:     getEnv("SUPER_ADMIN_NAME", "Root Admin"),
@@ -99,6 +96,7 @@ func Load() Config {
 
 		BookingWindowHours:        getEnvInt("BOOKING_WINDOW_HOURS", 2),
 		InstituteResultDelayHours: getEnvInt("INSTITUTE_RESULT_DELAY_HOURS", 0),
+		BaseURL:                   getEnv("BASE_URL", "http://localhost:8080"),
 	}
 }
 
