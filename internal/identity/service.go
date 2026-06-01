@@ -56,6 +56,7 @@ func (s *Service) SeedSuperAdmin(ctx context.Context, name, email, password stri
 // ── Candidate registration ────────────────────────────────────────────────────
 
 func (s *Service) RegisterCandidate(ctx context.Context, req RegisterCandidateRequest) error {
+	req.NormalizeFayidaID()
 	if err := req.validate(); err != nil {
 		return err
 	}
@@ -408,6 +409,7 @@ func (s *Service) CreateInvitation(ctx context.Context, auth *security.AuthConte
 }
 
 func (s *Service) AcceptInvitation(ctx context.Context, req AcceptInvitationRequest) (LoginResponse, error) {
+	req.NormalizeFayidaID()
 	if req.Token == "" || req.Password == "" {
 		return LoginResponse{}, errors.New("token and password are required")
 	}
@@ -445,8 +447,8 @@ func (s *Service) AcceptInvitation(ctx context.Context, req AcceptInvitationRequ
 				Status: domain.UserStatusActive,
 				Audit:  domain.Audit{CreatedAt: now, UpdatedAt: now, CreatedBy: inv.CreatedBy, UpdatedBy: inv.CreatedBy},
 			},
-			Phone: req.Phone,
-			FayidaID: req.FayidaID,
+			Phone:      req.Phone,
+			FayidaID:   req.FayidaID,
 			EmployeeID: req.EmployeeID,
 		}
 		if err := s.repo.CreateExpert(ctx, e); err != nil {

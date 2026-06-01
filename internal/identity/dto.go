@@ -16,6 +16,7 @@ type RegisterCandidateRequest struct {
 	Password   string    `json:"password"`
 	Phone      string    `json:"phone"`
 	FayidaID   string    `json:"fayida_id"`
+	FaydaID    string    `json:"fayda_id,omitempty"`
 	BirthDate  time.Time `json:"birth_date"`
 	Gender     string    `json:"gender"`
 }
@@ -57,31 +58,44 @@ type ChangePasswordRequest struct {
 type AcceptInvitationRequest struct {
 	Token      string `json:"token"`
 	Password   string `json:"password"`
-	FirstName  string `json:"first_name,omitempty"` 
+	FirstName  string `json:"first_name,omitempty"`
 	MiddleName string `json:"middle_name,omitempty"`
 	LastName   string `json:"last_name,omitempty"`
 	Name       string `json:"name,omitempty"`
 	Phone      string `json:"phone,omitempty"`
 	FayidaID   string `json:"fayida_id,omitempty"`
+	FaydaID    string `json:"fayda_id,omitempty"`
 	EmployeeID string `json:"employee_id,omitempty"`
+}
+
+func (r *RegisterCandidateRequest) NormalizeFayidaID() {
+	if r.FayidaID == "" && r.FaydaID != "" {
+		r.FayidaID = r.FaydaID
+	}
+}
+
+func (r *AcceptInvitationRequest) NormalizeFayidaID() {
+	if r.FayidaID == "" && r.FaydaID != "" {
+		r.FayidaID = r.FaydaID
+	}
 }
 
 // ── Candidates ────────────────────────────────────────────────────────────────
 
 type CandidateResponse struct {
-	ID         uuid.UUID  `json:"id"`
-	FirstName  string     `json:"first_name"`
-	MiddleName string     `json:"middle_name"`
-	LastName   string     `json:"last_name"`
-	Email      string     `json:"email"`
-	Phone      string     `json:"phone"`
-	FayidaID   string     `json:"fayida_id"`
-	BirthDate  time.Time  `json:"birth_date"`
-	Gender     string     `json:"gender"`
-	PhotoURL   string     `json:"photo_url,omitempty"`
-	Status     string     `json:"status"`
-	CreatedAt  time.Time  `json:"created_at"`
-	UpdatedAt  time.Time  `json:"updated_at"`
+	ID         uuid.UUID `json:"id"`
+	FirstName  string    `json:"first_name"`
+	MiddleName string    `json:"middle_name"`
+	LastName   string    `json:"last_name"`
+	Email      string    `json:"email"`
+	Phone      string    `json:"phone"`
+	FayidaID   string    `json:"fayida_id"`
+	BirthDate  time.Time `json:"birth_date"`
+	Gender     string    `json:"gender"`
+	PhotoURL   string    `json:"photo_url,omitempty"`
+	Status     string    `json:"status"`
+	CreatedAt  time.Time `json:"created_at"`
+	UpdatedAt  time.Time `json:"updated_at"`
 }
 
 type UpdateCandidateSelfRequest struct {
@@ -98,7 +112,7 @@ type UpdateCandidateAdminRequest struct {
 }
 
 type StatusRequest struct {
-	Status string `json:"status"` 
+	Status string `json:"status"`
 }
 
 // ── Experts ───────────────────────────────────────────────────────────────────
@@ -128,15 +142,15 @@ type UpdateExpertSelfRequest struct {
 // ── Institutes ────────────────────────────────────────────────────────────────
 
 type InstituteResponse struct {
-	ID      uuid.UUID `json:"id"`
-	Name    string    `json:"name"`
-	Email   string    `json:"email"`
-	Phone   string    `json:"phone"`
-	LogoURL string    `json:"logo_url,omitempty"`
-	Status  string    `json:"status"`
-	Address AddressDTO `json:"address"`
-	CreatedAt time.Time `json:"created_at"`
-	UpdatedAt time.Time `json:"updated_at"`
+	ID        uuid.UUID  `json:"id"`
+	Name      string     `json:"name"`
+	Email     string     `json:"email"`
+	Phone     string     `json:"phone"`
+	LogoURL   string     `json:"logo_url,omitempty"`
+	Status    string     `json:"status"`
+	Address   AddressDTO `json:"address"`
+	CreatedAt time.Time  `json:"created_at"`
+	UpdatedAt time.Time  `json:"updated_at"`
 }
 
 type UpdateInstituteSelfRequest struct {
@@ -150,14 +164,14 @@ type UpdateInstituteSelfRequest struct {
 // ── Transport Authorities ─────────────────────────────────────────────────────
 
 type AuthorityResponse struct {
-	ID      uuid.UUID  `json:"id"`
-	Name    string     `json:"name"`
-	Email   string     `json:"email"`
-	Phone   string     `json:"phone"`
-	Status  string     `json:"status"`
-	Address AddressDTO `json:"address"`
-	CreatedAt time.Time `json:"created_at"`
-	UpdatedAt time.Time `json:"updated_at"`
+	ID        uuid.UUID  `json:"id"`
+	Name      string     `json:"name"`
+	Email     string     `json:"email"`
+	Phone     string     `json:"phone"`
+	Status    string     `json:"status"`
+	Address   AddressDTO `json:"address"`
+	CreatedAt time.Time  `json:"created_at"`
+	UpdatedAt time.Time  `json:"updated_at"`
 }
 
 type UpdateAuthoritySelfRequest struct {
@@ -207,7 +221,7 @@ type UpdateSuperAdminSelfRequest struct {
 
 type CreateInvitationRequest struct {
 	Email        string     `json:"email"`
-	EntityType   string     `json:"entity_type"` // "expert"|"institute"|"admin"|"transport_authority"|"super_admin"
+	EntityType   string     `json:"entity_type"`              // "expert"|"institute"|"admin"|"transport_authority"|"super_admin"
 	TestCenterID *uuid.UUID `json:"test_center_id,omitempty"` // required for admin
 }
 

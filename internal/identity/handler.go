@@ -32,6 +32,7 @@ func (h *Handler) registerCandidate(w http.ResponseWriter, r *http.Request) {
 		httpx.Failure(w, http.StatusBadRequest, "INVALID_BODY", "request body is malformed or has invalid fields", nil)
 		return
 	}
+	req.NormalizeFayidaID()
 	if err := h.svc.RegisterCandidate(r.Context(), req); err != nil {
 		switch {
 		case errors.Is(err, ErrEmailTaken):
@@ -85,6 +86,7 @@ func (h *Handler) acceptInvitation(w http.ResponseWriter, r *http.Request) {
 		httpx.Failure(w, http.StatusBadRequest, "INVALID_BODY", "request body is malformed", nil)
 		return
 	}
+	req.NormalizeFayidaID()
 	resp, err := h.svc.AcceptInvitation(r.Context(), req)
 	if err != nil {
 		switch {
