@@ -57,7 +57,7 @@ type ChangePasswordRequest struct {
 type AcceptInvitationRequest struct {
 	Token      string `json:"token"`
 	Password   string `json:"password"`
-	FirstName  string `json:"first_name,omitempty"` 
+	FirstName  string `json:"first_name,omitempty"`
 	MiddleName string `json:"middle_name,omitempty"`
 	LastName   string `json:"last_name,omitempty"`
 	Name       string `json:"name,omitempty"`
@@ -69,19 +69,19 @@ type AcceptInvitationRequest struct {
 // ── Candidates ────────────────────────────────────────────────────────────────
 
 type CandidateResponse struct {
-	ID         uuid.UUID  `json:"id"`
-	FirstName  string     `json:"first_name"`
-	MiddleName string     `json:"middle_name"`
-	LastName   string     `json:"last_name"`
-	Email      string     `json:"email"`
-	Phone      string     `json:"phone"`
-	FayidaID   string     `json:"fayida_id"`
-	BirthDate  time.Time  `json:"birth_date"`
-	Gender     string     `json:"gender"`
-	PhotoURL   string     `json:"photo_url,omitempty"`
-	Status     string     `json:"status"`
-	CreatedAt  time.Time  `json:"created_at"`
-	UpdatedAt  time.Time  `json:"updated_at"`
+	ID         uuid.UUID `json:"id"`
+	FirstName  string    `json:"first_name"`
+	MiddleName string    `json:"middle_name"`
+	LastName   string    `json:"last_name"`
+	Email      string    `json:"email"`
+	Phone      string    `json:"phone"`
+	FayidaID   string    `json:"fayida_id"`
+	BirthDate  time.Time `json:"birth_date"`
+	Gender     string    `json:"gender"`
+	PhotoURL   string    `json:"photo_url,omitempty"`
+	Status     string    `json:"status"`
+	CreatedAt  time.Time `json:"created_at"`
+	UpdatedAt  time.Time `json:"updated_at"`
 }
 
 type UpdateCandidateSelfRequest struct {
@@ -98,7 +98,7 @@ type UpdateCandidateAdminRequest struct {
 }
 
 type StatusRequest struct {
-	Status string `json:"status"` 
+	Status string `json:"status"`
 }
 
 // ── Experts ───────────────────────────────────────────────────────────────────
@@ -128,15 +128,15 @@ type UpdateExpertSelfRequest struct {
 // ── Institutes ────────────────────────────────────────────────────────────────
 
 type InstituteResponse struct {
-	ID      uuid.UUID `json:"id"`
-	Name    string    `json:"name"`
-	Email   string    `json:"email"`
-	Phone   string    `json:"phone"`
-	LogoURL string    `json:"logo_url,omitempty"`
-	Status  string    `json:"status"`
-	Address AddressDTO `json:"address"`
-	CreatedAt time.Time `json:"created_at"`
-	UpdatedAt time.Time `json:"updated_at"`
+	ID        uuid.UUID  `json:"id"`
+	Name      string     `json:"name"`
+	Email     string     `json:"email"`
+	Phone     string     `json:"phone"`
+	LogoURL   string     `json:"logo_url,omitempty"`
+	Status    string     `json:"status"`
+	Address   AddressDTO `json:"address"`
+	CreatedAt time.Time  `json:"created_at"`
+	UpdatedAt time.Time  `json:"updated_at"`
 }
 
 type UpdateInstituteSelfRequest struct {
@@ -150,14 +150,14 @@ type UpdateInstituteSelfRequest struct {
 // ── Transport Authorities ─────────────────────────────────────────────────────
 
 type AuthorityResponse struct {
-	ID      uuid.UUID  `json:"id"`
-	Name    string     `json:"name"`
-	Email   string     `json:"email"`
-	Phone   string     `json:"phone"`
-	Status  string     `json:"status"`
-	Address AddressDTO `json:"address"`
-	CreatedAt time.Time `json:"created_at"`
-	UpdatedAt time.Time `json:"updated_at"`
+	ID        uuid.UUID  `json:"id"`
+	Name      string     `json:"name"`
+	Email     string     `json:"email"`
+	Phone     string     `json:"phone"`
+	Status    string     `json:"status"`
+	Address   AddressDTO `json:"address"`
+	CreatedAt time.Time  `json:"created_at"`
+	UpdatedAt time.Time  `json:"updated_at"`
 }
 
 type UpdateAuthoritySelfRequest struct {
@@ -203,11 +203,28 @@ type UpdateSuperAdminSelfRequest struct {
 	// email is IMMUTABLE
 }
 
+type SuperAdminDashboardResponse struct {
+	TotalCandidates    int `json:"total_candidates"`
+	TotalInstitutes    int `json:"total_institutes"`
+	TotalAdmins        int `json:"total_admins"`
+	ActiveTests        int `json:"active_tests"`
+	PendingInvitations int `json:"pending_invitations"`
+	PendingBookings    int `json:"pending_bookings"`
+}
+
+type SuperAdminAuditEventResponse struct {
+	EventID   string    `json:"event_id"`
+	EventType string    `json:"event_type"`
+	Summary   string    `json:"summary"`
+	ActorID   string    `json:"actor_id,omitempty"`
+	CreatedAt time.Time `json:"created_at"`
+}
+
 // ── Invitations ───────────────────────────────────────────────────────────────
 
 type CreateInvitationRequest struct {
 	Email        string     `json:"email"`
-	EntityType   string     `json:"entity_type"` // "expert"|"institute"|"admin"|"transport_authority"|"super_admin"
+	EntityType   string     `json:"entity_type"`              // "expert"|"institute"|"admin"|"transport_authority"|"super_admin"
 	TestCenterID *uuid.UUID `json:"test_center_id,omitempty"` // required for admin
 }
 

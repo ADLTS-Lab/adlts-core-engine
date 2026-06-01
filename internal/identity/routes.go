@@ -102,6 +102,13 @@ func (h *Handler) Mount(r chi.Router) {
 		r.Delete("/{id}", h.deleteSuperAdmin)
 	})
 
+	r.Route("/super-admin", func(r chi.Router) {
+		r.Use(auth)
+		r.Use(superOnly)
+		r.Get("/dashboard", h.superAdminDashboard)
+		r.Get("/audits", h.superAdminAudits)
+	})
+
 	r.Route("/invitations", func(r chi.Router) {
 		r.Use(auth)
 		r.Use(adminOrSuper)
