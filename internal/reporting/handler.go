@@ -10,7 +10,6 @@ import (
 	"github.com/google/uuid"
 )
 
-
 type Handler struct {
 	svc *Service
 }
@@ -20,10 +19,8 @@ func NewHandler(svc *Service) *Handler {
 }
 
 func (h *Handler) Mount(r chi.Router) {
-	r.Route("/reports", func(r chi.Router) {
-		r.Post("/{testID}/generate", h.generateReport)
-		r.Get("/{testID}/pdf", h.getReportPDF)
-	})
+	r.Post("/{testID}/generate", h.generateReport)
+	r.Get("/{testID}/pdf", h.getReportPDF)
 }
 
 func (h *Handler) generateReport(w http.ResponseWriter, r *http.Request) {
