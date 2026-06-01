@@ -251,11 +251,19 @@ func (s *Service) loginAuthority(ctx context.Context, req LoginRequest) (LoginRe
 }
 
 func (s *Service) issueToken(id uuid.UUID, et security.EntityType, email string, centerID *uuid.UUID) (LoginResponse, error) {
-	token, err := s.tokens.Sign(id, et, email, centerID)
+	accessToken, err := s.tokens.SignAccessToken(id, et, email, centerID)
 	if err != nil {
-		return LoginResponse{}, fmt.Errorf("sign token: %w", err)
+		return LoginResponse{}, fmt.Errorf("sign access token: %w", err)
 	}
-	return LoginResponse{AccessToken: token, EntityType: string(et)}, nil
+	refreshToken, err := s.tokens.SignRefreshToken(id, et, email, centerID)
+	if err != nil {
+		return LoginResponse{}, fmt.Errorf("sign refresh token: %w", err)
+	}
+	return LoginResponse{
+		AccessToken:  accessToken,
+		RefreshToken: refreshToken,
+		EntityType:   string(et),
+	}, nil
 }
 
 // ── Password flows ────────────────────────────────────────────────────────────
@@ -445,8 +453,8 @@ func (s *Service) AcceptInvitation(ctx context.Context, req AcceptInvitationRequ
 				Status: domain.UserStatusActive,
 				Audit:  domain.Audit{CreatedAt: now, UpdatedAt: now, CreatedBy: inv.CreatedBy, UpdatedBy: inv.CreatedBy},
 			},
-			Phone: req.Phone,
-			FayidaID: req.FayidaID,
+			Phone:      req.Phone,
+			FayidaID:   req.FayidaID,
 			EmployeeID: req.EmployeeID,
 		}
 		if err := s.repo.CreateExpert(ctx, e); err != nil {
