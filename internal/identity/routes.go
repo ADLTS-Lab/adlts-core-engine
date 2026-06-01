@@ -20,7 +20,7 @@ func (h *Handler) Mount(r chi.Router) {
 		r.Post("/invitations/accept", h.acceptInvitation)
 		r.Post("/login", h.login)
 		r.With(auth).Post("/logout", h.logout)
-		r.With(auth).Post("/token/refresh", h.refreshToken)
+		r.Post("/token/refresh", h.refreshToken)
 		r.Post("/password/forgot", h.forgotPassword)
 		r.Post("/password/reset", h.resetPassword)
 		r.With(auth).Patch("/password/change", h.changePassword)
