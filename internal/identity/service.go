@@ -57,6 +57,7 @@ func (s *Service) SeedSuperAdmin(ctx context.Context, name, email, password stri
 // ── Candidate registration ────────────────────────────────────────────────────
 
 func (s *Service) RegisterCandidate(ctx context.Context, req RegisterCandidateRequest) error {
+	req.NormalizeFayidaID()
 	if err := req.validate(); err != nil {
 		return err
 	}
@@ -440,6 +441,7 @@ func (s *Service) CreateInvitation(ctx context.Context, auth *security.AuthConte
 }
 
 func (s *Service) AcceptInvitation(ctx context.Context, req AcceptInvitationRequest) (LoginResponse, error) {
+	req.NormalizeFayidaID()
 	if req.Token == "" || req.Password == "" {
 		return LoginResponse{}, errors.New("token and password are required")
 	}
