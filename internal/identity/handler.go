@@ -444,6 +444,36 @@ func (h *Handler) listInstitutes(w http.ResponseWriter, r *http.Request) {
 	httpx.Success(w, http.StatusOK, out, &httpx.Meta{Page: page, Total: total, Limit: 20})
 }
 
+func (h *Handler) listActiveInstitutesForCandidates(w http.ResponseWriter, r *http.Request) {
+	q := r.URL.Query()
+	page := pageParam(q.Get("page"))
+	limit := httpx.QueryInt(q, "limit", 20)
+	if limit <= 0 {
+		limit = 20
+	}
+	if limit > 100 {
+		limit = 100
+	}
+
+	insts, total, err := h.svc.repo.ListActiveInstitutes(r.Context(), page, limit)
+	if err != nil {
+		httpx.Failure(w, http.StatusInternalServerError, "DB_ERROR", "could not fetch active institutes", nil)
+		return
+	}
+
+	out := make([]ActiveInstituteResponse, 0, len(insts))
+	for _, inst := range insts {
+		out = append(out, ActiveInstituteResponse{
+			ID:     inst.ID,
+			Name:   inst.Name,
+			Status: string(inst.Status),
+			City:   inst.City,
+			Region: inst.Region,
+		})
+	}
+	httpx.Success(w, http.StatusOK, out, &httpx.Meta{Page: page, Limit: limit, Total: total})
+}
+
 func (h *Handler) instituteMe(w http.ResponseWriter, r *http.Request) {
 	auth, _ := security.CurrentAuth(r)
 	inst, err := h.svc.repo.InstituteByID(r.Context(), auth.SubjectID)

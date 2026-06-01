@@ -196,6 +196,57 @@ func (r *Repository) ListInstitutes(ctx context.Context, search, status string, 
 	return out, total, nil
 }
 
+type ActiveInstitute struct {
+	ID     uuid.UUID
+	Name   string
+	Status domain.OrgStatus
+	City   string
+	Region string
+}
+
+func (r *Repository) ListActiveInstitutes(ctx context.Context, page, limit int) ([]ActiveInstitute, int, error) {
+	if page < 1 {
+		page = 1
+	}
+	if limit <= 0 {
+		limit = 20
+	}
+	if limit > 100 {
+		limit = 100
+	}
+	offset := (page - 1) * limit
+
+	var total int
+	if err := r.db.QueryRow(ctx, `SELECT COUNT(*) FROM institutes WHERE status='active'`).Scan(&total); err != nil {
+		return nil, 0, err
+	}
+
+	rows, err := r.db.Query(ctx, `
+		SELECT id, name, status, COALESCE(city,''), COALESCE(region,'')
+		FROM institutes
+		WHERE status='active'
+		ORDER BY name ASC
+		LIMIT $1 OFFSET $2
+	`, limit, offset)
+	if err != nil {
+		return nil, 0, err
+	}
+	defer rows.Close()
+
+	out := make([]ActiveInstitute, 0, limit)
+	for rows.Next() {
+		var item ActiveInstitute
+		if err := rows.Scan(&item.ID, &item.Name, &item.Status, &item.City, &item.Region); err != nil {
+			return nil, 0, err
+		}
+		out = append(out, item)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, 0, err
+	}
+	return out, total, nil
+}
+
 func (r *Repository) UpdateInstituteFields(ctx context.Context, id uuid.UUID, fields map[string]any, updatedBy uuid.UUID) error {
 	return updateFields(ctx, r.db, "institutes", id, fields, updatedBy)
 }

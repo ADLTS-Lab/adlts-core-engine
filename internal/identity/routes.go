@@ -56,6 +56,7 @@ func (h *Handler) Mount(r chi.Router) {
 	r.Route("/institutes", func(r chi.Router) {
 		r.Use(auth)
 		r.With(adminOrSuper).Get("/", h.listInstitutes)
+		r.With(security.RequireEntities(security.EntityCandidate)).Get("/active", h.listActiveInstitutesForCandidates)
 		r.With(security.RequireEntities(security.EntityInstitute)).Get("/me", h.instituteMe)
 		r.With(security.RequireEntities(security.EntityInstitute)).Patch("/me", h.updateInstituteMe)
 		r.With(security.RequireEntities(security.EntityInstitute)).Patch("/me/logo", h.uploadInstituteLogoMe)
