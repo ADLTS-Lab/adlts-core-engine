@@ -153,6 +153,14 @@ type InstituteResponse struct {
 	UpdatedAt time.Time  `json:"updated_at"`
 }
 
+type ActiveInstituteResponse struct {
+	ID     uuid.UUID `json:"id"`
+	Name   string    `json:"name"`
+	Status string    `json:"status"`
+	City   string    `json:"city,omitempty"`
+	Region string    `json:"region,omitempty"`
+}
+
 type UpdateInstituteSelfRequest struct {
 	Name    *string     `json:"name,omitempty"`
 	Phone   *string     `json:"phone,omitempty"`
