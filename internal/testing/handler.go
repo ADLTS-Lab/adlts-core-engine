@@ -1457,11 +1457,21 @@ func (h *Handler) listTests(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
 	statusFilter := q.Get("status")
 	page := httpx.QueryInt(q, "page", 1)
+	limit := httpx.QueryInt(q, "limit", 20)
+	if page < 1 {
+		page = 1
+	}
+	if limit <= 0 {
+		limit = 20
+	}
+	if limit > 100 {
+		limit = 100
+	}
 	var candidateID uuid.UUID
 	if raw := q.Get("candidate_id"); raw != "" {
 		candidateID, _ = uuid.Parse(raw)
 	}
-	tests, err := h.repo.ListTests(r.Context(), tcID(auth), statusFilter, candidateID, page)
+	tests, total, err := h.repo.ListTests(r.Context(), tcID(auth), statusFilter, candidateID, page, limit)
 	if err != nil {
 		httpx.Failure(w, http.StatusInternalServerError, "DB_ERROR", err.Error(), nil)
 		return
@@ -1470,7 +1480,7 @@ func (h *Handler) listTests(w http.ResponseWriter, r *http.Request) {
 	for _, t := range tests {
 		out = append(out, toTestResponse(t))
 	}
-	httpx.Success(w, http.StatusOK, out, &httpx.Meta{Page: page, Limit: 20})
+	httpx.Success(w, http.StatusOK, out, &httpx.Meta{Page: page, Limit: limit, Total: total})
 }
 
 func (h *Handler) getTest(w http.ResponseWriter, r *http.Request) {
