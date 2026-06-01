@@ -8,6 +8,8 @@ import (
 	"strings"
 	"time"
 
+	"adlts/internal/platform/httpx"
+
 	"github.com/golang-jwt/jwt/v5"
 	"github.com/google/uuid"
 	"golang.org/x/crypto/bcrypt"
@@ -127,17 +129,17 @@ func Authenticate(manager *Manager) func(http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			tokenString := r.Header.Get("Authorization")
 			if tokenString == "" {
-				http.Error(w, "missing authorization header", http.StatusUnauthorized)
+				httpx.Failure(w, http.StatusUnauthorized, "UNAUTHENTICATED", "missing authorization header", nil)
 				return
 			}
 			parts := strings.SplitN(tokenString, " ", 2)
 			if len(parts) != 2 || !strings.EqualFold(parts[0], "Bearer") {
-				http.Error(w, "invalid authorization header", http.StatusUnauthorized)
+				httpx.Failure(w, http.StatusUnauthorized, "UNAUTHENTICATED", "invalid authorization header", nil)
 				return
 			}
 			claims, err := manager.Parse(parts[1])
 			if err != nil {
-				http.Error(w, "invalid token", http.StatusUnauthorized)
+				httpx.Failure(w, http.StatusUnauthorized, "UNAUTHENTICATED", "invalid or expired token", nil)
 				return
 			}
 			ctx := context.WithValue(r.Context(), authContextKey{}, &AuthContext{
@@ -161,7 +163,7 @@ func RequireEntities(allowed ...EntityType) func(http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			auth, ok := CurrentAuth(r)
 			if !ok {
-				http.Error(w, "unauthorized", http.StatusUnauthorized)
+				httpx.Failure(w, http.StatusUnauthorized, "UNAUTHENTICATED", "authentication required", nil)
 				return
 			}
 			for _, e := range allowed {
@@ -170,7 +172,7 @@ func RequireEntities(allowed ...EntityType) func(http.Handler) http.Handler {
 					return
 				}
 			}
-			http.Error(w, "forbidden", http.StatusForbidden)
+			httpx.Failure(w, http.StatusForbidden, "FORBIDDEN", "insufficient permissions", nil)
 		})
 	}
 }
@@ -179,11 +181,11 @@ func RequireInternalToken(expected string) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			if expected == "" {
-				http.Error(w, "internal token not configured", http.StatusForbidden)
+				httpx.Failure(w, http.StatusForbidden, "FORBIDDEN", "internal token not configured", nil)
 				return
 			}
 			if got := r.Header.Get("X-Internal-Token"); got != expected {
-				http.Error(w, "invalid internal token", http.StatusForbidden)
+				httpx.Failure(w, http.StatusForbidden, "FORBIDDEN", "invalid internal token", nil)
 				return
 			}
 			next.ServeHTTP(w, r)
