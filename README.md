@@ -36,7 +36,18 @@ go run ./cmd/api
 
 # Server listening on http://localhost:8080
 curl http://localhost:8080/health
+
+# Seed integration data
+DATABASE_URL=$DATABASE_URL go run ./cmd/seed/main.go
 ```
+
+Seeded login accounts:
+- `super@adlts.et` / `SuperAdmin123!`
+- `admin@adlts.et` / `Admin123!`
+- `candidate@test.et` / `Candidate123!`
+- `institute@test.et` / `Institute123!`
+- `expert@test.et` / `Expert123!`
+- `authority@test.et` / `Authority123!`
 
 **Or with Docker:**
 
