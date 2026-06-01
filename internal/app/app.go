@@ -122,8 +122,22 @@ func Build(cfg config.Config, db *pgxpool.Pool, logger *slog.Logger) *http.Serve
 
 	r.Get("/health", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
+		if db == nil {
+			w.WriteHeader(http.StatusServiceUnavailable)
+			_, _ = w.Write([]byte(`{"status":"degraded","db":"error"}`))
+			return
+		}
+
+		ctx, cancel := context.WithTimeout(r.Context(), 2*time.Second)
+		defer cancel()
+		if err := db.Ping(ctx); err != nil {
+			w.WriteHeader(http.StatusServiceUnavailable)
+			_, _ = w.Write([]byte(`{"status":"degraded","db":"error"}`))
+			return
+		}
+
 		w.WriteHeader(http.StatusOK)
-		_, _ = w.Write([]byte(`{"status":"ok"}`))
+		_, _ = w.Write([]byte(`{"status":"ok","db":"ok"}`))
 	})
 
 	// Static media file serving — public, UUID-obscured paths
