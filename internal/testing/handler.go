@@ -745,6 +745,59 @@ func (h *Handler) getMyPendingTest(w http.ResponseWriter, r *http.Request) {
 	httpx.Success(w, http.StatusOK, toTestResponse(test), nil)
 }
 
+func (h *Handler) getMyTests(w http.ResponseWriter, r *http.Request) {
+	auth := mustAuth(w, r)
+	if auth == nil {
+		return
+	}
+
+	q := r.URL.Query()
+	page := httpx.QueryInt(q, "page", 1)
+	limit := httpx.QueryInt(q, "limit", 20)
+	if page < 1 {
+		page = 1
+	}
+	if limit <= 0 {
+		limit = 20
+	}
+	if limit > 100 {
+		limit = 100
+	}
+	statusFilter := q.Get("status")
+
+	tests, total, err := h.repo.ListMyTests(r.Context(), auth.SubjectID, statusFilter, page, limit)
+	if err != nil {
+		httpx.Failure(w, http.StatusInternalServerError, "DB_ERROR", err.Error(), nil)
+		return
+	}
+
+	out := make([]TestResponse, 0, len(tests))
+	for _, t := range tests {
+		out = append(out, toTestResponse(t))
+	}
+	httpx.Success(w, http.StatusOK, out, &httpx.Meta{Page: page, Limit: limit, Total: total})
+}
+
+func (h *Handler) getMyTestStats(w http.ResponseWriter, r *http.Request) {
+	auth := mustAuth(w, r)
+	if auth == nil {
+		return
+	}
+
+	total, passed, failed, pending, err := h.repo.MyTestStats(r.Context(), auth.SubjectID)
+	if err != nil {
+		httpx.Failure(w, http.StatusInternalServerError, "DB_ERROR", err.Error(), nil)
+		return
+	}
+
+	httpx.Success(w, http.StatusOK, MyTestStatsResponse{
+		Total:   total,
+		Passed:  passed,
+		Failed:  failed,
+		Pending: pending,
+	}, nil)
+}
+
 func (h *Handler) getTestStatus(w http.ResponseWriter, r *http.Request) {
 	id, err := uuid.Parse(chi.URLParam(r, "id"))
 	if err != nil {
@@ -932,6 +985,10 @@ func (h *Handler) getTestResult(w http.ResponseWriter, r *http.Request) {
 	test, err := h.repo.TestByID(r.Context(), id)
 	if err != nil {
 		httpx.Failure(w, http.StatusNotFound, "TEST_NOT_FOUND", "test not found", nil)
+		return
+	}
+	if auth.EntityType == security.EntityCandidate && test.CandidateID != auth.SubjectID {
+		httpx.Failure(w, http.StatusForbidden, "FORBIDDEN", "you can only view your own test result", nil)
 		return
 	}
 

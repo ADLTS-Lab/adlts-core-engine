@@ -134,6 +134,14 @@ func (h *Handler) Mount(api chi.Router, root chi.Router, tokens *security.Manage
 			security.Authenticate(tokens),
 			security.RequireEntities(security.EntityCandidate),
 		).Get("/my/pending", h.getMyPendingTest)
+		r.With(
+			security.Authenticate(tokens),
+			security.RequireEntities(security.EntityCandidate),
+		).Get("/my", h.getMyTests)
+		r.With(
+			security.Authenticate(tokens),
+			security.RequireEntities(security.EntityCandidate),
+		).Get("/my/stats", h.getMyTestStats)
 
 		r.With(
 			security.Authenticate(tokens),
