@@ -136,8 +136,18 @@ func (h *Handler) logout(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) refreshToken(w http.ResponseWriter, r *http.Request) {
-	// Refresh token rotation is a future enhancement — return 501 until implemented.
-	httpx.Failure(w, http.StatusNotImplemented, "NOT_IMPLEMENTED", "token refresh is not yet available", nil)
+	var req RefreshRequest
+	if err := httpx.DecodeJSON(r, &req); err != nil {
+		httpx.Failure(w, http.StatusBadRequest, "INVALID_BODY", "request body is malformed", nil)
+		return
+	}
+
+	resp, err := h.svc.RefreshToken(r.Context(), req.RefreshToken)
+	if err != nil {
+		httpx.Failure(w, http.StatusUnauthorized, "INVALID_REFRESH_TOKEN", "refresh token is invalid or expired", nil)
+		return
+	}
+	httpx.Success(w, http.StatusOK, resp, nil)
 }
 
 func (h *Handler) forgotPassword(w http.ResponseWriter, r *http.Request) {

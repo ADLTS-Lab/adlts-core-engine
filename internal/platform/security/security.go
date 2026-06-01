@@ -16,17 +16,25 @@ import (
 type EntityType string
 
 const (
-	EntityCandidate         EntityType = "candidate"
-	EntityExpert            EntityType = "expert"
-	EntityAdmin             EntityType = "admin"
-	EntitySuperAdmin        EntityType = "super_admin"
-	EntityInstitute         EntityType = "institute"
+	EntityCandidate          EntityType = "candidate"
+	EntityExpert             EntityType = "expert"
+	EntityAdmin              EntityType = "admin"
+	EntitySuperAdmin         EntityType = "super_admin"
+	EntityInstitute          EntityType = "institute"
 	EntityTransportAuthority EntityType = "transport_authority"
+)
+
+type TokenType string
+
+const (
+	TokenTypeAccess  TokenType = "access"
+	TokenTypeRefresh TokenType = "refresh"
 )
 
 type Claims struct {
 	SubjectID    uuid.UUID  `json:"sub_id"`
 	EntityType   EntityType `json:"entity_type"`
+	TokenType    TokenType  `json:"token_type"`
 	Email        string     `json:"email"`
 	TestCenterID *uuid.UUID `json:"test_center_id,omitempty"`
 	jwt.RegisteredClaims
@@ -50,16 +58,29 @@ func NewManager(secret string) *Manager {
 }
 
 func (m *Manager) Sign(id uuid.UUID, entityType EntityType, email string, testCenterID *uuid.UUID) (string, error) {
+	return m.SignAccessToken(id, entityType, email, testCenterID)
+}
+
+func (m *Manager) SignAccessToken(id uuid.UUID, entityType EntityType, email string, testCenterID *uuid.UUID) (string, error) {
+	return m.signWithTTL(id, entityType, email, testCenterID, TokenTypeAccess, 12*time.Hour)
+}
+
+func (m *Manager) SignRefreshToken(id uuid.UUID, entityType EntityType, email string, testCenterID *uuid.UUID) (string, error) {
+	return m.signWithTTL(id, entityType, email, testCenterID, TokenTypeRefresh, 7*24*time.Hour)
+}
+
+func (m *Manager) signWithTTL(id uuid.UUID, entityType EntityType, email string, testCenterID *uuid.UUID, tokenType TokenType, ttl time.Duration) (string, error) {
 	now := time.Now().UTC()
 	claims := Claims{
 		SubjectID:    id,
 		EntityType:   entityType,
+		TokenType:    tokenType,
 		Email:        email,
 		TestCenterID: testCenterID,
 		RegisteredClaims: jwt.RegisteredClaims{
 			Subject:   id.String(),
 			IssuedAt:  jwt.NewNumericDate(now),
-			ExpiresAt: jwt.NewNumericDate(now.Add(12 * time.Hour)),
+			ExpiresAt: jwt.NewNumericDate(now.Add(ttl)),
 			NotBefore: jwt.NewNumericDate(now.Add(-1 * time.Minute)),
 			Issuer:    "adlts",
 			Audience:  []string{"adlts-api"},
@@ -82,6 +103,9 @@ func (m *Manager) Parse(tokenString string) (*Claims, error) {
 	claims, ok := token.Claims.(*Claims)
 	if !ok || !token.Valid {
 		return nil, errors.New("invalid token")
+	}
+	if claims.TokenType == "" {
+		claims.TokenType = TokenTypeAccess
 	}
 	return claims, nil
 }
