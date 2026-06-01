@@ -225,6 +225,23 @@ type UpdateSuperAdminSelfRequest struct {
 	// email is IMMUTABLE
 }
 
+type SuperAdminDashboardResponse struct {
+	TotalCandidates    int `json:"total_candidates"`
+	TotalInstitutes    int `json:"total_institutes"`
+	TotalAdmins        int `json:"total_admins"`
+	ActiveTests        int `json:"active_tests"`
+	PendingInvitations int `json:"pending_invitations"`
+	PendingBookings    int `json:"pending_bookings"`
+}
+
+type SuperAdminAuditEventResponse struct {
+	EventID   string    `json:"event_id"`
+	EventType string    `json:"event_type"`
+	Summary   string    `json:"summary"`
+	ActorID   string    `json:"actor_id,omitempty"`
+	CreatedAt time.Time `json:"created_at"`
+}
+
 // ── Invitations ───────────────────────────────────────────────────────────────
 
 type CreateInvitationRequest struct {

@@ -538,6 +538,115 @@ func (r *Repository) CancelInvitation(ctx context.Context, id uuid.UUID) error {
 	return err
 }
 
+type SuperAdminDashboardMetrics struct {
+	TotalCandidates    int
+	TotalInstitutes    int
+	TotalAdmins        int
+	ActiveTests        int
+	PendingInvitations int
+	PendingBookings    int
+}
+
+type SuperAdminAuditEvent struct {
+	EventID   string
+	EventType string
+	Summary   string
+	ActorID   string
+	CreatedAt time.Time
+}
+
+func (r *Repository) SuperAdminDashboardMetrics(ctx context.Context) (SuperAdminDashboardMetrics, error) {
+	var out SuperAdminDashboardMetrics
+
+	if err := r.db.QueryRow(ctx, `SELECT COUNT(*) FROM candidates`).Scan(&out.TotalCandidates); err != nil {
+		return out, err
+	}
+	if err := r.db.QueryRow(ctx, `SELECT COUNT(*) FROM institutes`).Scan(&out.TotalInstitutes); err != nil {
+		return out, err
+	}
+	if err := r.db.QueryRow(ctx, `SELECT COUNT(*) FROM admins`).Scan(&out.TotalAdmins); err != nil {
+		return out, err
+	}
+	if err := r.db.QueryRow(ctx, `SELECT COUNT(*) FROM tests WHERE status='running'`).Scan(&out.ActiveTests); err != nil {
+		return out, err
+	}
+	if err := r.db.QueryRow(ctx, `SELECT COUNT(*) FROM invitations WHERE used_at IS NULL AND expires_at > NOW()`).Scan(&out.PendingInvitations); err != nil {
+		return out, err
+	}
+	if err := r.db.QueryRow(ctx, `
+		SELECT COUNT(*) FROM bookings
+		WHERE status IN ('drafted','pending_verification','verified','scheduled','payment_pending')
+	`).Scan(&out.PendingBookings); err != nil {
+		return out, err
+	}
+	return out, nil
+}
+
+func (r *Repository) SuperAdminAuditEvents(ctx context.Context, page, limit int) ([]SuperAdminAuditEvent, int, error) {
+	if page < 1 {
+		page = 1
+	}
+	if limit <= 0 {
+		limit = 20
+	}
+	if limit > 100 {
+		limit = 100
+	}
+	offset := (page - 1) * limit
+
+	unionSQL := `
+		SELECT id::text AS event_id,
+			'invitation_created' AS event_type,
+			(email || ' invited as ' || entity_type) AS summary,
+			COALESCE(created_by::text, '') AS actor_id,
+			created_at
+		FROM invitations
+		UNION ALL
+		SELECT id::text AS event_id,
+			'booking_status_updated' AS event_type,
+			('booking status ' || status) AS summary,
+			COALESCE(updated_by::text, '') AS actor_id,
+			updated_at AS created_at
+		FROM bookings
+		UNION ALL
+		SELECT id::text AS event_id,
+			'test_status_updated' AS event_type,
+			('test status ' || status::text) AS summary,
+			COALESCE(updated_by::text, '') AS actor_id,
+			updated_at AS created_at
+		FROM tests
+	`
+
+	var total int
+	if err := r.db.QueryRow(ctx, `SELECT COUNT(*) FROM (`+unionSQL+`) events`).Scan(&total); err != nil {
+		return nil, 0, err
+	}
+
+	rows, err := r.db.Query(ctx, `
+		SELECT event_id, event_type, summary, actor_id, created_at
+		FROM (`+unionSQL+`) events
+		ORDER BY created_at DESC
+		LIMIT $1 OFFSET $2
+	`, limit, offset)
+	if err != nil {
+		return nil, 0, err
+	}
+	defer rows.Close()
+
+	out := make([]SuperAdminAuditEvent, 0, limit)
+	for rows.Next() {
+		var e SuperAdminAuditEvent
+		if err := rows.Scan(&e.EventID, &e.EventType, &e.Summary, &e.ActorID, &e.CreatedAt); err != nil {
+			return nil, 0, err
+		}
+		out = append(out, e)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, 0, err
+	}
+	return out, total, nil
+}
+
 // ── OTP ───────────────────────────────────────────────────────────────────────
 
 func (r *Repository) UpsertOTP(ctx context.Context, email, code string, expiresAt time.Time) error {

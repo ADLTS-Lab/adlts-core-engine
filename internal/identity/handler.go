@@ -931,6 +931,52 @@ func (h *Handler) deleteSuperAdmin(w http.ResponseWriter, r *http.Request) {
 	httpx.Success(w, http.StatusOK, map[string]string{"message": "super admin deleted"}, nil)
 }
 
+func (h *Handler) superAdminDashboard(w http.ResponseWriter, r *http.Request) {
+	metrics, err := h.svc.repo.SuperAdminDashboardMetrics(r.Context())
+	if err != nil {
+		httpx.Failure(w, http.StatusInternalServerError, "DB_ERROR", "could not load dashboard metrics", nil)
+		return
+	}
+	httpx.Success(w, http.StatusOK, SuperAdminDashboardResponse{
+		TotalCandidates:    metrics.TotalCandidates,
+		TotalInstitutes:    metrics.TotalInstitutes,
+		TotalAdmins:        metrics.TotalAdmins,
+		ActiveTests:        metrics.ActiveTests,
+		PendingInvitations: metrics.PendingInvitations,
+		PendingBookings:    metrics.PendingBookings,
+	}, nil)
+}
+
+func (h *Handler) superAdminAudits(w http.ResponseWriter, r *http.Request) {
+	q := r.URL.Query()
+	page := pageParam(q.Get("page"))
+	limit := httpx.QueryInt(q, "limit", 20)
+	if limit <= 0 {
+		limit = 20
+	}
+	if limit > 100 {
+		limit = 100
+	}
+
+	events, total, err := h.svc.repo.SuperAdminAuditEvents(r.Context(), page, limit)
+	if err != nil {
+		httpx.Failure(w, http.StatusInternalServerError, "DB_ERROR", "could not load audit events", nil)
+		return
+	}
+
+	out := make([]SuperAdminAuditEventResponse, 0, len(events))
+	for _, e := range events {
+		out = append(out, SuperAdminAuditEventResponse{
+			EventID:   e.EventID,
+			EventType: e.EventType,
+			Summary:   e.Summary,
+			ActorID:   e.ActorID,
+			CreatedAt: e.CreatedAt,
+		})
+	}
+	httpx.Success(w, http.StatusOK, out, &httpx.Meta{Page: page, Limit: limit, Total: total})
+}
+
 // ─── Invitations ──────────────────────────────────────────────────────────────
 
 func (h *Handler) createInvitation(w http.ResponseWriter, r *http.Request) {
