@@ -69,6 +69,7 @@ var (
 	seedTestResult1ID    = mustUUID("10000000-0000-4000-8000-000000000161")
 	seedTestResult2ID    = mustUUID("10000000-0000-4000-8000-000000000162")
 	seedAppealID         = mustUUID("10000000-0000-4000-8000-000000000171")
+	seedLegacySessionID  = mustUUID("10000000-0000-4000-8000-000000000172")
 )
 
 func main() {
@@ -304,7 +305,11 @@ func seed(ctx context.Context, tx pgx.Tx) error {
 		return fmt.Errorf("upsert test result2: %w", err)
 	}
 
-	if err := upsertAppeal(ctx, tx, seedAppealID, seedCompletedTest1ID, seedSessionResult1ID, seedCandidate2ID, expertID, now); err != nil {
+	if err := upsertLegacySession(ctx, tx, seedLegacySessionID, seedBookingConfirmed1ID, seedCandidate2ID, centerID, seedDevice1ID, adminID, 88.40, now); err != nil {
+		return fmt.Errorf("upsert legacy session: %w", err)
+	}
+
+	if err := upsertAppeal(ctx, tx, seedAppealID, seedCompletedTest1ID, seedLegacySessionID, seedCandidate2ID, expertID, now); err != nil {
 		return fmt.Errorf("upsert appeal: %w", err)
 	}
 
@@ -684,7 +689,7 @@ func upsertManeuver(ctx context.Context, tx pgx.Tx, id, planID uuid.UUID, sequen
 		)
 		VALUES (
 			$1,$2,$3,$4,$5,$6,
-			20,1.00,30,NULL,$3,70.0,
+			20,1.00,30,NULL,$9,70.0,
 			$7,$7,$8,$8
 		)
 		ON CONFLICT (test_plan_id, sequence_number) DO UPDATE SET
@@ -699,7 +704,7 @@ func upsertManeuver(ctx context.Context, tx pgx.Tx, id, planID uuid.UUID, sequen
 			updated_at=NOW(),
 			updated_by=EXCLUDED.updated_by
 		RETURNING id
-	`, id, planID, name, description, sequence, qrCode, now, actorID).Scan(&out)
+	`, id, planID, name, description, sequence, qrCode, now, actorID, name).Scan(&out)
 	return out, err
 }
 
@@ -876,18 +881,47 @@ func upsertTestResult(ctx context.Context, tx pgx.Tx, id, testID uuid.UUID, scor
 	return err
 }
 
-func upsertAppeal(ctx context.Context, tx pgx.Tx, id, testID, sessionID, candidateID, expertID uuid.UUID, now time.Time) error {
+func upsertLegacySession(ctx context.Context, tx pgx.Tx, id, bookingID, candidateID, centerID, deviceID, actorID uuid.UUID, score float64, now time.Time) error {
 	_, err := tx.Exec(ctx, `
-		INSERT INTO appeals (
-			id, test_id, session_id, candidate_id, expert_id, reason, status, resolution,
+		INSERT INTO sessions (
+			id, booking_id, candidate_id, test_center_id, device_id, status, score,
+			recording_url, result_overlay_url, started_at, completed_at, finalized_at,
 			created_at, updated_at, created_by, updated_by
 		)
 		VALUES (
-			$1,$2,$3,$4,$5,'Candidate disputes parking penalty','pending',NULL,
-			$6,$6,$4,$4
+			$1,$2,$3,$4,$5,'completed',$6,
+			'seed-recording.mp4','seed-overlay.json',$7,$8,$8,
+			$7,$7,$9,$9
 		)
 		ON CONFLICT (id) DO UPDATE SET
-			test_id=EXCLUDED.test_id,
+			booking_id=EXCLUDED.booking_id,
+			candidate_id=EXCLUDED.candidate_id,
+			test_center_id=EXCLUDED.test_center_id,
+			device_id=EXCLUDED.device_id,
+			status=EXCLUDED.status,
+			score=EXCLUDED.score,
+			recording_url=EXCLUDED.recording_url,
+			result_overlay_url=EXCLUDED.result_overlay_url,
+			started_at=EXCLUDED.started_at,
+			completed_at=EXCLUDED.completed_at,
+			finalized_at=EXCLUDED.finalized_at,
+			updated_at=NOW(),
+			updated_by=EXCLUDED.updated_by
+	`, id, bookingID, candidateID, centerID, deviceID, score, now.Add(-50*time.Hour), now.Add(-48*time.Hour), actorID)
+	return err
+}
+
+func upsertAppeal(ctx context.Context, tx pgx.Tx, id, testID, sessionID, candidateID, expertID uuid.UUID, now time.Time) error {
+	_, err := tx.Exec(ctx, `
+		INSERT INTO appeals (
+			id, session_id, candidate_id, expert_id, reason, status, resolution,
+			created_at, updated_at, created_by, updated_by
+		)
+		VALUES (
+			$1,$2,$3,$4,'Candidate disputes parking penalty','pending',NULL,
+			$5,$5,$3,$3
+		)
+		ON CONFLICT (id) DO UPDATE SET
 			session_id=EXCLUDED.session_id,
 			candidate_id=EXCLUDED.candidate_id,
 			expert_id=EXCLUDED.expert_id,
@@ -896,7 +930,7 @@ func upsertAppeal(ctx context.Context, tx pgx.Tx, id, testID, sessionID, candida
 			resolution=NULL,
 			updated_at=NOW(),
 			updated_by=EXCLUDED.updated_by
-	`, id, testID, sessionID, candidateID, expertID, now)
+	`, id, sessionID, candidateID, expertID, now)
 	return err
 }
 
