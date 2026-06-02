@@ -425,12 +425,12 @@ func upsertCandidate(ctx context.Context, tx pgx.Tx, id uuid.UUID, firstName, la
 	err := tx.QueryRow(ctx, `
 		INSERT INTO candidates (
 			id, first_name, middle_name, last_name, email, password_hash, status,
-			phone, fayida_id, birth_date, gender, street, city, region, country,
+			phone, fayida_id, birth_date, gender, photo_url, street, city, region, country,
 			created_at, updated_at, created_by, updated_by
 		)
 		VALUES (
 			$1,$2,'',$3,$4,$5,'active',
-			'+251911100000',$6,$7,'male','CMC','Addis Ababa','Addis Ababa','Ethiopia',
+			'+251911100000',$6,$7,'male','','CMC','Addis Ababa','Addis Ababa','Ethiopia',
 			NOW(),NOW(),$8,$8
 		)
 		ON CONFLICT (email) DO UPDATE SET
@@ -443,6 +443,7 @@ func upsertCandidate(ctx context.Context, tx pgx.Tx, id uuid.UUID, firstName, la
 			fayida_id=EXCLUDED.fayida_id,
 			birth_date=EXCLUDED.birth_date,
 			gender=EXCLUDED.gender,
+			photo_url=EXCLUDED.photo_url,
 			street=EXCLUDED.street,
 			city=EXCLUDED.city,
 			region=EXCLUDED.region,
