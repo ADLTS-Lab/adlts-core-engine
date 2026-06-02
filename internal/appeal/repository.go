@@ -79,7 +79,7 @@ func (r *Repository) ListAppeals(ctx context.Context, status string, page, limit
 
 	args = append(args, limit, offset)
 	query := fmt.Sprintf(`
-		SELECT id, test_id, session_id, candidate_id, expert_id, reason, status, resolution, created_at, updated_at, created_by, updated_by
+		SELECT id, session_id, candidate_id, expert_id, reason, status, resolution, created_at, updated_at, created_by, updated_by
 		FROM appeals %s
 		ORDER BY created_at DESC
 		LIMIT $%d OFFSET $%d
@@ -94,7 +94,6 @@ func (r *Repository) ListAppeals(ctx context.Context, status string, page, limit
 	for rows.Next() {
 		var a domain.Appeal
 		var (
-			testID     *uuid.UUID
 			sessionID  *uuid.UUID
 			expertID   *uuid.UUID
 			resolution *string
@@ -104,13 +103,10 @@ func (r *Repository) ListAppeals(ctx context.Context, status string, page, limit
 			updatedBy  uuid.UUID
 		)
 		if err := rows.Scan(
-			&a.ID, &testID, &sessionID, &a.CandidateID, &expertID, &a.Reason, &a.Status, &resolution,
+			&a.ID, &sessionID, &a.CandidateID, &expertID, &a.Reason, &a.Status, &resolution,
 			&createdAt, &updatedAt, &createdBy, &updatedBy,
 		); err != nil {
 			return nil, 0, err
-		}
-		if testID != nil {
-			a.TestID = *testID
 		}
 		if sessionID != nil {
 			a.SessionID = *sessionID

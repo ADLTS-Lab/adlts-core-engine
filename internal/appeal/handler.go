@@ -156,9 +156,9 @@ func (h *Handler) getAppeal(w http.ResponseWriter, r *http.Request) {
 	var createdBy, updatedBy uuid.UUID
 
 	err = h.svc.repo.db.QueryRow(r.Context(), `
-		SELECT id, test_id, session_id, candidate_id, expert_id, reason, status, resolution, created_at, updated_at, created_by, updated_by
+		SELECT id, session_id, candidate_id, expert_id, reason, status, resolution, created_at, updated_at, created_by, updated_by
 		FROM appeals WHERE id = $1
-	`, appealID).Scan(&a.ID, &a.TestID, &a.SessionID, &a.CandidateID, &expertID, &a.Reason, &a.Status, &resolution, &createdAt, &updatedAt, &createdBy, &updatedBy)
+	`, appealID).Scan(&a.ID, &a.SessionID, &a.CandidateID, &expertID, &a.Reason, &a.Status, &resolution, &createdAt, &updatedAt, &createdBy, &updatedBy)
 	if err != nil {
 		httpx.Failure(w, http.StatusNotFound, "NOT_FOUND", "appeal not found", nil)
 		return
