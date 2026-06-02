@@ -55,7 +55,7 @@ type BookingTestSuite struct {
 func (s *BookingTestSuite) SetupSuite() {
 	dsn := os.Getenv("TEST_DATABASE_URL")
 	if dsn == "" {
-		dsn = "postgres://postgres:password@localhost:5432/adlts_test?sslmode=disable"
+		dsn = "postgres://adlts:adlts@localhost:5432/adlts_test?sslmode=disable"
 	}
 	ctx := context.Background()
 	pool, err := db.Connect(ctx, dsn)
