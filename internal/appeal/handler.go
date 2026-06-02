@@ -3,6 +3,7 @@ package appeal
 import (
 	"net/http"
 	"strconv"
+	"strings"
 	"time"
 
 	"adlts/internal/domain"
@@ -101,10 +102,16 @@ type resolveReq struct {
 }
 
 func parseAppealStatus(s string) (domain.AppealStatus, bool) {
-	switch s {
+	switch strings.TrimSpace(strings.ToLower(s)) {
 	case "accepted":
 		return domain.AppealAccepted, true
 	case "rejected":
+		return domain.AppealRejected, true
+	case "accept":
+		return domain.AppealAccepted, true
+	case "approve":
+		return domain.AppealAccepted, true
+	case "reject":
 		return domain.AppealRejected, true
 	default:
 		return "", false

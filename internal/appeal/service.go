@@ -45,15 +45,31 @@ func (s *Service) ResolveAppeal(ctx context.Context, appealID uuid.UUID, status 
 	}
 
 	if status == domain.AppealAccepted {
-		// set test_results.passed = true for the test referenced by this appeal
+		// set test_results.passed = true for the test referenced by this appeal session
 		if _, err := tx.Exec(ctx, `
 			UPDATE test_results
 			SET passed = true
-			WHERE test_id = (SELECT test_id FROM appeals WHERE id = $1)
+			WHERE test_id = (
+				SELECT t.id
+				FROM tests t
+				JOIN sessions s ON s.booking_id = t.booking_id
+				WHERE s.id = (SELECT session_id FROM appeals WHERE id = $1)
+				LIMIT 1
+			)
 		`, appealID); err != nil {
 			return err
 		}
-		if _, err := tx.Exec(ctx, `UPDATE tests SET updated_at=NOW() WHERE id = (SELECT test_id FROM appeals WHERE id = $1)`, appealID); err != nil {
+		if _, err := tx.Exec(ctx, `
+			UPDATE tests
+			SET updated_at = NOW()
+			WHERE id = (
+				SELECT t.id
+				FROM tests t
+				JOIN sessions s ON s.booking_id = t.booking_id
+				WHERE s.id = (SELECT session_id FROM appeals WHERE id = $1)
+				LIMIT 1
+			)
+		`, appealID); err != nil {
 			return err
 		}
 	}
