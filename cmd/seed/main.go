@@ -193,7 +193,7 @@ func seed(ctx context.Context, tx pgx.Tx) error {
 	if err != nil {
 		return fmt.Errorf("upsert expert: %w", err)
 	}
-	if _, err := upsertAuthority(ctx, tx, seedAuthorityID, authorityHash, superAdminID); err != nil {
+	if _, err := upsertAuthority(ctx, tx, seedAuthorityID, "Integration Authority", "authority@test.et", authorityHash, superAdminID); err != nil {
 		return fmt.Errorf("upsert authority: %w", err)
 	}
 
@@ -397,16 +397,18 @@ func upsertInstitute(ctx context.Context, tx pgx.Tx, id uuid.UUID, name, email, 
 	var out uuid.UUID
 	err := tx.QueryRow(ctx, `
 		INSERT INTO institutes (
-			id, name, email, password_hash, phone, status,
+			id, name, name_am, email, password_hash, phone, logo_url, status,
 			street, city, region, country, created_at, updated_at, created_by, updated_by
 		)
 		VALUES (
-			$1,$2,$3,$4,'+251911000200','active',
+			$1,$2,$2,$3,$4,'+251911000200','/logos/institutes/seed.svg','active',
 			'Bole Road','Addis Ababa','Addis Ababa','Ethiopia',NOW(),NOW(),$5,$5
 		)
 		ON CONFLICT (email) DO UPDATE SET
 			name=EXCLUDED.name,
+			name_am=EXCLUDED.name_am,
 			password_hash=EXCLUDED.password_hash,
+			logo_url=EXCLUDED.logo_url,
 			phone=EXCLUDED.phone,
 			status=EXCLUDED.status,
 			street=EXCLUDED.street,
@@ -484,20 +486,23 @@ func upsertExpert(ctx context.Context, tx pgx.Tx, id uuid.UUID, passwordHash str
 	return out, err
 }
 
-func upsertAuthority(ctx context.Context, tx pgx.Tx, id uuid.UUID, passwordHash string, actorID uuid.UUID) (uuid.UUID, error) {
+func upsertAuthority(ctx context.Context, tx pgx.Tx, id uuid.UUID, name, email, passwordHash string, actorID uuid.UUID) (uuid.UUID, error) {
 	var out uuid.UUID
 	err := tx.QueryRow(ctx, `
 		INSERT INTO transport_authorities (
-			id, name, email, password_hash, phone, status,
+			id, name, name_am, email, password_hash, phone, logo_url, status,
 			street, city, region, country, created_at, updated_at, created_by, updated_by
 		)
 		VALUES (
-			$1,'Integration Authority','authority@test.et',$2,'+251911300100','active',
-			'Kazanchis','Addis Ababa','Addis Ababa','Ethiopia',NOW(),NOW(),$3,$3
+			$1,$2,$2,$3,$4,'+251911300100','/logos/authorities/seed.svg','active',
+			'Kazanchis','Addis Ababa','Addis Ababa','Ethiopia',NOW(),NOW(),$5,$5
 		)
 		ON CONFLICT (email) DO UPDATE SET
 			name=EXCLUDED.name,
+			name_am=EXCLUDED.name_am,
+			email=EXCLUDED.email,
 			password_hash=EXCLUDED.password_hash,
+			logo_url=EXCLUDED.logo_url,
 			phone=EXCLUDED.phone,
 			status=EXCLUDED.status,
 			street=EXCLUDED.street,
@@ -507,7 +512,7 @@ func upsertAuthority(ctx context.Context, tx pgx.Tx, id uuid.UUID, passwordHash 
 			updated_at=NOW(),
 			updated_by=EXCLUDED.updated_by
 		RETURNING id
-	`, id, passwordHash, actorID).Scan(&out)
+	`, id, name, email, passwordHash, actorID).Scan(&out)
 	return out, err
 }
 
