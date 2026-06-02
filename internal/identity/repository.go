@@ -2,6 +2,7 @@ package identity
 
 import (
 	"context"
+	"database/sql"
 	"fmt"
 	"strings"
 	"time"
@@ -838,9 +839,10 @@ func scanCandidateRow(rows pgx.Rows) (*domain.Candidate, error) {
 
 func scanExpert(row scannable) (*domain.Expert, error) {
 	var e domain.Expert
+	var photoURL sql.NullString
 	err := row.Scan(
 		&e.ID, &e.FirstName, &e.MiddleName, &e.LastName, &e.Email, &e.PasswordHash, &e.Status,
-		&e.Phone, &e.FayidaID, &e.EmployeeID, &e.BirthDate, &e.Gender, &e.PhotoURL,
+		&e.Phone, &e.FayidaID, &e.EmployeeID, &e.BirthDate, &e.Gender, &photoURL,
 		&e.CreatedAt, &e.UpdatedAt, &e.Audit.CreatedBy, &e.Audit.UpdatedBy,
 	)
 	if err != nil {
@@ -848,6 +850,9 @@ func scanExpert(row scannable) (*domain.Expert, error) {
 			return nil, nil
 		}
 		return nil, err
+	}
+	if photoURL.Valid {
+		e.PhotoURL = photoURL.String
 	}
 	return &e, nil
 }
