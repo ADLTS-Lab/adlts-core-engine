@@ -257,13 +257,13 @@ type FrameAnalysisResponse struct {
 // ── Test response ─────────────────────────────────────────────────────────────
 
 type TestResponse struct {
-	ID            uuid.UUID  `json:"id"`
-	BookingID     uuid.UUID  `json:"booking_id"`
-	CandidateID   uuid.UUID  `json:"candidate_id"`
-	TestCenterID  uuid.UUID  `json:"test_center_id"`
-	TestPlanID    uuid.UUID  `json:"test_plan_id"`
-	DeviceID      *uuid.UUID `json:"device_id,omitempty"`
-	TestLevelCode string     `json:"test_level_code"`
+	ID                 uuid.UUID  `json:"id"`
+	BookingID          uuid.UUID  `json:"booking_id"`
+	CandidateID        uuid.UUID  `json:"candidate_id"`
+	TestCenterID       uuid.UUID  `json:"test_center_id"`
+	TestPlanID         uuid.UUID  `json:"test_plan_id"`
+	DeviceID           *uuid.UUID `json:"device_id,omitempty"`
+	TestLevelCode      string     `json:"test_level_code"`
 	Status             string     `json:"status"`
 	AbortReason        *string    `json:"abort_reason,omitempty"`
 	ScheduledStartAt   *time.Time `json:"scheduled_start_at,omitempty"`
@@ -272,6 +272,13 @@ type TestResponse struct {
 	StartedAt          *time.Time `json:"started_at,omitempty"`
 	CompletedAt        *time.Time `json:"completed_at,omitempty"`
 	CreatedAt          time.Time  `json:"created_at"`
+}
+
+type MyTestStatsResponse struct {
+	Total   int `json:"total"`
+	Passed  int `json:"passed"`
+	Failed  int `json:"failed"`
+	Pending int `json:"pending"`
 }
 
 // ── Monitor DTOs ──────────────────────────────────────────────────────────────

@@ -37,11 +37,11 @@ type IdentityTestSuite struct {
 func (s *IdentityTestSuite) SetupSuite() {
 	dsn := os.Getenv("TEST_DATABASE_URL")
 	if dsn == "" {
-		dsn = "postgres://postgres:password@localhost:5432/adlts_test?sslmode=disable"
+		dsn = "postgres://adlts:adlts@localhost:5432/adlts_test?sslmode=disable"
 	}
 	ctx := context.Background()
 	pool, err := db.Connect(ctx, dsn)
-	require.NoError(s.T(), err, "failed to connect to local test postgres. ensure one is running on 5432 with user/pass postgres/postgres or set TEST_DATABASE_URL")
+	require.NoError(s.T(), err, "failed to connect to local test postgres. ensure one is running on 5432 with user/pass adlts/adlts or set TEST_DATABASE_URL")
 
 	s.db = pool
 

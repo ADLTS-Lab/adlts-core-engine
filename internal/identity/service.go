@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"math/big"
+	"strings"
 	"time"
 
 	"adlts/internal/domain"
@@ -56,6 +57,7 @@ func (s *Service) SeedSuperAdmin(ctx context.Context, name, email, password stri
 // ── Candidate registration ────────────────────────────────────────────────────
 
 func (s *Service) RegisterCandidate(ctx context.Context, req RegisterCandidateRequest) error {
+	req.NormalizeFayidaID()
 	if err := req.validate(); err != nil {
 		return err
 	}
@@ -148,6 +150,29 @@ func (s *Service) Login(ctx context.Context, req LoginRequest) (LoginResponse, e
 		}
 	}
 	return LoginResponse{}, ErrInvalidCredentials
+}
+
+func (s *Service) RefreshToken(ctx context.Context, refreshToken string) (LoginResponse, error) {
+	_ = ctx
+	if strings.TrimSpace(refreshToken) == "" {
+		return LoginResponse{}, ErrInvalidRefreshToken
+	}
+
+	claims, err := s.tokens.Parse(refreshToken)
+	if err != nil {
+		return LoginResponse{}, ErrInvalidRefreshToken
+	}
+	if claims.TokenType != security.TokenTypeRefresh {
+		return LoginResponse{}, ErrInvalidRefreshToken
+	}
+	if claims.SubjectID == uuid.Nil || claims.EntityType == "" || claims.Email == "" {
+		return LoginResponse{}, ErrInvalidRefreshToken
+	}
+	if entityTable(claims.EntityType) == "" {
+		return LoginResponse{}, ErrInvalidRefreshToken
+	}
+
+	return s.issueToken(claims.SubjectID, claims.EntityType, claims.Email, claims.TestCenterID)
 }
 
 func (s *Service) loginCandidate(ctx context.Context, req LoginRequest) (LoginResponse, error) {
@@ -251,11 +276,19 @@ func (s *Service) loginAuthority(ctx context.Context, req LoginRequest) (LoginRe
 }
 
 func (s *Service) issueToken(id uuid.UUID, et security.EntityType, email string, centerID *uuid.UUID) (LoginResponse, error) {
-	token, err := s.tokens.Sign(id, et, email, centerID)
+	accessToken, err := s.tokens.SignAccessToken(id, et, email, centerID)
 	if err != nil {
-		return LoginResponse{}, fmt.Errorf("sign token: %w", err)
+		return LoginResponse{}, fmt.Errorf("sign access token: %w", err)
 	}
-	return LoginResponse{AccessToken: token, EntityType: string(et)}, nil
+	refreshToken, err := s.tokens.SignRefreshToken(id, et, email, centerID)
+	if err != nil {
+		return LoginResponse{}, fmt.Errorf("sign refresh token: %w", err)
+	}
+	return LoginResponse{
+		AccessToken:  accessToken,
+		RefreshToken: refreshToken,
+		EntityType:   string(et),
+	}, nil
 }
 
 // ── Password flows ────────────────────────────────────────────────────────────
@@ -408,6 +441,7 @@ func (s *Service) CreateInvitation(ctx context.Context, auth *security.AuthConte
 }
 
 func (s *Service) AcceptInvitation(ctx context.Context, req AcceptInvitationRequest) (LoginResponse, error) {
+	req.NormalizeFayidaID()
 	if req.Token == "" || req.Password == "" {
 		return LoginResponse{}, errors.New("token and password are required")
 	}
@@ -445,8 +479,8 @@ func (s *Service) AcceptInvitation(ctx context.Context, req AcceptInvitationRequ
 				Status: domain.UserStatusActive,
 				Audit:  domain.Audit{CreatedAt: now, UpdatedAt: now, CreatedBy: inv.CreatedBy, UpdatedBy: inv.CreatedBy},
 			},
-			Phone: req.Phone,
-			FayidaID: req.FayidaID,
+			Phone:      req.Phone,
+			FayidaID:   req.FayidaID,
 			EmployeeID: req.EmployeeID,
 		}
 		if err := s.repo.CreateExpert(ctx, e); err != nil {
@@ -622,6 +656,7 @@ var (
 	ErrInvalidOTP          = errors.New("invalid or expired verification code")
 	ErrInvalidResetToken   = errors.New("invalid or expired reset token")
 	ErrInvalidInviteToken  = errors.New("invalid invitation token")
+	ErrInvalidRefreshToken = errors.New("invalid refresh token")
 	ErrInviteAlreadyUsed   = errors.New("invitation already used")
 	ErrInviteExpired       = errors.New("invitation has expired")
 	ErrForbiddenInviteRole = errors.New("admin can only invite expert or institute")

@@ -2,6 +2,7 @@ package identity
 
 import (
 	"context"
+	"database/sql"
 	"fmt"
 	"strings"
 	"time"
@@ -193,6 +194,57 @@ func (r *Repository) ListInstitutes(ctx context.Context, search, status string, 
 	}
 	var total int
 	_ = r.db.QueryRow(ctx, `SELECT COUNT(*) FROM institutes `+where, args...).Scan(&total)
+	return out, total, nil
+}
+
+type ActiveInstitute struct {
+	ID     uuid.UUID
+	Name   string
+	Status domain.OrgStatus
+	City   string
+	Region string
+}
+
+func (r *Repository) ListActiveInstitutes(ctx context.Context, page, limit int) ([]ActiveInstitute, int, error) {
+	if page < 1 {
+		page = 1
+	}
+	if limit <= 0 {
+		limit = 20
+	}
+	if limit > 100 {
+		limit = 100
+	}
+	offset := (page - 1) * limit
+
+	var total int
+	if err := r.db.QueryRow(ctx, `SELECT COUNT(*) FROM institutes WHERE status='active'`).Scan(&total); err != nil {
+		return nil, 0, err
+	}
+
+	rows, err := r.db.Query(ctx, `
+		SELECT id, name, status, COALESCE(city,''), COALESCE(region,'')
+		FROM institutes
+		WHERE status='active'
+		ORDER BY name ASC
+		LIMIT $1 OFFSET $2
+	`, limit, offset)
+	if err != nil {
+		return nil, 0, err
+	}
+	defer rows.Close()
+
+	out := make([]ActiveInstitute, 0, limit)
+	for rows.Next() {
+		var item ActiveInstitute
+		if err := rows.Scan(&item.ID, &item.Name, &item.Status, &item.City, &item.Region); err != nil {
+			return nil, 0, err
+		}
+		out = append(out, item)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, 0, err
+	}
 	return out, total, nil
 }
 
@@ -487,6 +539,115 @@ func (r *Repository) CancelInvitation(ctx context.Context, id uuid.UUID) error {
 	return err
 }
 
+type SuperAdminDashboardMetrics struct {
+	TotalCandidates    int
+	TotalInstitutes    int
+	TotalAdmins        int
+	ActiveTests        int
+	PendingInvitations int
+	PendingBookings    int
+}
+
+type SuperAdminAuditEvent struct {
+	EventID   string
+	EventType string
+	Summary   string
+	ActorID   string
+	CreatedAt time.Time
+}
+
+func (r *Repository) SuperAdminDashboardMetrics(ctx context.Context) (SuperAdminDashboardMetrics, error) {
+	var out SuperAdminDashboardMetrics
+
+	if err := r.db.QueryRow(ctx, `SELECT COUNT(*) FROM candidates`).Scan(&out.TotalCandidates); err != nil {
+		return out, err
+	}
+	if err := r.db.QueryRow(ctx, `SELECT COUNT(*) FROM institutes`).Scan(&out.TotalInstitutes); err != nil {
+		return out, err
+	}
+	if err := r.db.QueryRow(ctx, `SELECT COUNT(*) FROM admins`).Scan(&out.TotalAdmins); err != nil {
+		return out, err
+	}
+	if err := r.db.QueryRow(ctx, `SELECT COUNT(*) FROM tests WHERE status='running'`).Scan(&out.ActiveTests); err != nil {
+		return out, err
+	}
+	if err := r.db.QueryRow(ctx, `SELECT COUNT(*) FROM invitations WHERE used_at IS NULL AND expires_at > NOW()`).Scan(&out.PendingInvitations); err != nil {
+		return out, err
+	}
+	if err := r.db.QueryRow(ctx, `
+		SELECT COUNT(*) FROM bookings
+		WHERE status IN ('drafted','pending_verification','verified','scheduled','payment_pending')
+	`).Scan(&out.PendingBookings); err != nil {
+		return out, err
+	}
+	return out, nil
+}
+
+func (r *Repository) SuperAdminAuditEvents(ctx context.Context, page, limit int) ([]SuperAdminAuditEvent, int, error) {
+	if page < 1 {
+		page = 1
+	}
+	if limit <= 0 {
+		limit = 20
+	}
+	if limit > 100 {
+		limit = 100
+	}
+	offset := (page - 1) * limit
+
+	unionSQL := `
+		SELECT id::text AS event_id,
+			'invitation_created' AS event_type,
+			(email || ' invited as ' || entity_type) AS summary,
+			COALESCE(created_by::text, '') AS actor_id,
+			created_at
+		FROM invitations
+		UNION ALL
+		SELECT id::text AS event_id,
+			'booking_status_updated' AS event_type,
+			('booking status ' || status) AS summary,
+			COALESCE(updated_by::text, '') AS actor_id,
+			updated_at AS created_at
+		FROM bookings
+		UNION ALL
+		SELECT id::text AS event_id,
+			'test_status_updated' AS event_type,
+			('test status ' || status::text) AS summary,
+			COALESCE(updated_by::text, '') AS actor_id,
+			updated_at AS created_at
+		FROM tests
+	`
+
+	var total int
+	if err := r.db.QueryRow(ctx, `SELECT COUNT(*) FROM (`+unionSQL+`) events`).Scan(&total); err != nil {
+		return nil, 0, err
+	}
+
+	rows, err := r.db.Query(ctx, `
+		SELECT event_id, event_type, summary, actor_id, created_at
+		FROM (`+unionSQL+`) events
+		ORDER BY created_at DESC
+		LIMIT $1 OFFSET $2
+	`, limit, offset)
+	if err != nil {
+		return nil, 0, err
+	}
+	defer rows.Close()
+
+	out := make([]SuperAdminAuditEvent, 0, limit)
+	for rows.Next() {
+		var e SuperAdminAuditEvent
+		if err := rows.Scan(&e.EventID, &e.EventType, &e.Summary, &e.ActorID, &e.CreatedAt); err != nil {
+			return nil, 0, err
+		}
+		out = append(out, e)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, 0, err
+	}
+	return out, total, nil
+}
+
 // ── OTP ───────────────────────────────────────────────────────────────────────
 
 func (r *Repository) UpsertOTP(ctx context.Context, email, code string, expiresAt time.Time) error {
@@ -608,14 +769,23 @@ func updateFields(ctx context.Context, db *pgxpool.Pool, table string, id uuid.U
 func buildFilter(search, status, statusType string, startIdx int) (string, []any) {
 	conds := []string{}
 	args := []any{}
+	paramIdx := startIdx
 	if status != "" {
 		args = append(args, status)
-		conds = append(conds, fmt.Sprintf("status=$%d", len(args)))
+		conds = append(conds, fmt.Sprintf("status=$%d", paramIdx))
+		paramIdx++
 	}
 	if search != "" {
 		args = append(args, "%"+search+"%")
-		conds = append(conds, fmt.Sprintf("(first_name ILIKE $%d OR last_name ILIKE $%d OR email ILIKE $%d OR name ILIKE $%d)",
-			len(args), len(args), len(args), len(args)))
+		switch statusType {
+		case "org_status":
+			conds = append(conds, fmt.Sprintf("(name ILIKE $%d OR email ILIKE $%d)", paramIdx, paramIdx))
+		case "user_status":
+			conds = append(conds, fmt.Sprintf("(first_name ILIKE $%d OR last_name ILIKE $%d OR email ILIKE $%d)", paramIdx, paramIdx, paramIdx))
+		default:
+			conds = append(conds, fmt.Sprintf("(name ILIKE $%d OR first_name ILIKE $%d OR last_name ILIKE $%d OR email ILIKE $%d)", paramIdx, paramIdx, paramIdx, paramIdx))
+		}
+		paramIdx++
 	}
 	if len(conds) == 0 {
 		return "", args
@@ -657,10 +827,16 @@ type scannable interface {
 
 func scanCandidate(row scannable) (*domain.Candidate, error) {
 	var c domain.Candidate
+	var phone sql.NullString
+	var photoURL sql.NullString
+	var street sql.NullString
+	var city sql.NullString
+	var region sql.NullString
+	var country sql.NullString
 	err := row.Scan(
 		&c.ID, &c.FirstName, &c.MiddleName, &c.LastName, &c.Email, &c.PasswordHash, &c.Status,
-		&c.Phone, &c.FayidaID, &c.BirthDate, &c.Gender, &c.PhotoURL,
-		&c.Address.Street, &c.Address.City, &c.Address.Region, &c.Address.Country,
+		&phone, &c.FayidaID, &c.BirthDate, &c.Gender, &photoURL,
+		&street, &city, &region, &country,
 		&c.CreatedAt, &c.UpdatedAt, &c.Audit.CreatedBy, &c.Audit.UpdatedBy,
 	)
 	if err != nil {
@@ -668,6 +844,24 @@ func scanCandidate(row scannable) (*domain.Candidate, error) {
 			return nil, nil
 		}
 		return nil, err
+	}
+	if phone.Valid {
+		c.Phone = phone.String
+	}
+	if photoURL.Valid {
+		c.PhotoURL = photoURL.String
+	}
+	if street.Valid {
+		c.Address.Street = street.String
+	}
+	if city.Valid {
+		c.Address.City = city.String
+	}
+	if region.Valid {
+		c.Address.Region = region.String
+	}
+	if country.Valid {
+		c.Address.Country = country.String
 	}
 	return &c, nil
 }
@@ -678,9 +872,11 @@ func scanCandidateRow(rows pgx.Rows) (*domain.Candidate, error) {
 
 func scanExpert(row scannable) (*domain.Expert, error) {
 	var e domain.Expert
+	var phone sql.NullString
+	var photoURL sql.NullString
 	err := row.Scan(
 		&e.ID, &e.FirstName, &e.MiddleName, &e.LastName, &e.Email, &e.PasswordHash, &e.Status,
-		&e.Phone, &e.FayidaID, &e.EmployeeID, &e.BirthDate, &e.Gender, &e.PhotoURL,
+		&phone, &e.FayidaID, &e.EmployeeID, &e.BirthDate, &e.Gender, &photoURL,
 		&e.CreatedAt, &e.UpdatedAt, &e.Audit.CreatedBy, &e.Audit.UpdatedBy,
 	)
 	if err != nil {
@@ -689,6 +885,12 @@ func scanExpert(row scannable) (*domain.Expert, error) {
 		}
 		return nil, err
 	}
+	if phone.Valid {
+		e.Phone = phone.String
+	}
+	if photoURL.Valid {
+		e.PhotoURL = photoURL.String
+	}
 	return &e, nil
 }
 
@@ -696,10 +898,17 @@ func scanExpertRow(rows pgx.Rows) (*domain.Expert, error) { return scanExpert(ro
 
 func scanInstitute(row scannable) (*domain.Institute, error) {
 	var inst domain.Institute
+	var nameAm sql.NullString
+	var phone sql.NullString
+	var logoURL sql.NullString
+	var street sql.NullString
+	var city sql.NullString
+	var region sql.NullString
+	var country sql.NullString
 	err := row.Scan(
-		&inst.ID, &inst.Name, &inst.NameAm, &inst.Email, &inst.PasswordHash,
-		&inst.Phone, &inst.LogoURL, &inst.Status,
-		&inst.Address.Street, &inst.Address.City, &inst.Address.Region, &inst.Address.Country,
+		&inst.ID, &inst.Name, &nameAm, &inst.Email, &inst.PasswordHash,
+		&phone, &logoURL, &inst.Status,
+		&street, &city, &region, &country,
 		&inst.CreatedAt, &inst.UpdatedAt, &inst.Audit.CreatedBy, &inst.Audit.UpdatedBy,
 	)
 	if err != nil {
@@ -708,6 +917,28 @@ func scanInstitute(row scannable) (*domain.Institute, error) {
 		}
 		return nil, err
 	}
+	inst.NameAm = nil
+	if nameAm.Valid {
+		inst.NameAm = &nameAm.String
+	}
+	if phone.Valid {
+		inst.Phone = phone.String
+	}
+	if logoURL.Valid {
+		inst.LogoURL = logoURL.String
+	}
+	if street.Valid {
+		inst.Address.Street = street.String
+	}
+	if city.Valid {
+		inst.Address.City = city.String
+	}
+	if region.Valid {
+		inst.Address.Region = region.String
+	}
+	if country.Valid {
+		inst.Address.Country = country.String
+	}
 	return &inst, nil
 }
 
@@ -715,10 +946,17 @@ func scanInstituteRow(rows pgx.Rows) (*domain.Institute, error) { return scanIns
 
 func scanAuthority(row scannable) (*domain.TransportAuthority, error) {
 	var a domain.TransportAuthority
+	var nameAm sql.NullString
+	var phone sql.NullString
+	var logoURL sql.NullString
+	var street sql.NullString
+	var city sql.NullString
+	var region sql.NullString
+	var country sql.NullString
 	err := row.Scan(
-		&a.ID, &a.Name, &a.NameAm, &a.Email, &a.PasswordHash,
-		&a.Phone, &a.LogoURL, &a.Status,
-		&a.Address.Street, &a.Address.City, &a.Address.Region, &a.Address.Country,
+		&a.ID, &a.Name, &nameAm, &a.Email, &a.PasswordHash,
+		&phone, &logoURL, &a.Status,
+		&street, &city, &region, &country,
 		&a.CreatedAt, &a.UpdatedAt, &a.Audit.CreatedBy, &a.Audit.UpdatedBy,
 	)
 	if err != nil {
@@ -726,6 +964,28 @@ func scanAuthority(row scannable) (*domain.TransportAuthority, error) {
 			return nil, nil
 		}
 		return nil, err
+	}
+	a.NameAm = nil
+	if nameAm.Valid {
+		a.NameAm = &nameAm.String
+	}
+	if phone.Valid {
+		a.Phone = phone.String
+	}
+	if logoURL.Valid {
+		a.LogoURL = logoURL.String
+	}
+	if street.Valid {
+		a.Address.Street = street.String
+	}
+	if city.Valid {
+		a.Address.City = city.String
+	}
+	if region.Valid {
+		a.Address.Region = region.String
+	}
+	if country.Valid {
+		a.Address.Country = country.String
 	}
 	return &a, nil
 }
