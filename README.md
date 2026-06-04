@@ -363,6 +363,28 @@ For production, use environment-specific configurations:
 4. Enable HTTPS with a reverse proxy (Nginx, Caddy)
 5. Monitor logs and metrics via your platform (CloudWatch, DataDog, etc.)
 
+### Render Deployment
+
+If Render logs show `127.0.0.1:5432` or `[::1]:5432` connection refused, the web service is using a local development `DATABASE_URL`. On Render, `localhost` is the API container itself, not your Postgres database.
+
+Set the backend web service environment variable:
+
+```env
+DATABASE_URL=postgresql://USER:PASSWORD@INTERNAL_HOST:5432/DATABASE
+```
+
+Use the **Internal Database URL** from your Render Postgres database when the web service and database are in the same account and region. Remove any `DATABASE_URL=postgres://...@localhost:5432/...` value from the service environment or attached environment groups, then redeploy.
+
+Required Render environment variables include:
+
+```env
+DATABASE_URL=<Render Postgres Internal Database URL>
+JWT_SECRET=<strong production secret>
+BASE_URL=https://<your-backend>.onrender.com
+FRONTEND_BASE_URL=https://<your-frontend-domain>
+CORS_ALLOWED_ORIGINS=https://<your-frontend-domain>
+```
+
 ### Health Checks
 
 Kubernetes-style health endpoints:

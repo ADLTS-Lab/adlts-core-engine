@@ -131,6 +131,12 @@ func (s *Service) VerifyBooking(ctx context.Context, auth *security.AuthContext,
 		return domain.Booking{}, ErrBookingNotFound
 	}
 	if b.Status != domain.BookingPendingVerification {
+		if req.Action == "approve" && b.Status == domain.BookingVerified {
+			return b, nil
+		}
+		if req.Action == "reject" && b.Status == domain.BookingRejected {
+			return b, nil
+		}
 		return domain.Booking{}, ErrInvalidStatusForAction
 	}
 
@@ -141,6 +147,9 @@ func (s *Service) VerifyBooking(ctx context.Context, auth *security.AuthContext,
 		fields["verified_at"] = time.Now().UTC()
 	} else {
 		fields["status"] = string(domain.BookingRejected)
+		if strings.TrimSpace(req.RejectionReason) == "" {
+			req.RejectionReason = "Rejected by reviewer"
+		}
 		fields["rejection_reason"] = req.RejectionReason
 	}
 
@@ -306,7 +315,12 @@ func (s *Service) InitiatePayment(ctx context.Context, auth *security.AuthContex
 	if b.CandidateID != auth.SubjectID {
 		return InitiatePaymentResponse{}, ErrForbidden
 	}
-	if b.Status != domain.BookingScheduled {
+	if b.PaymentStatus == "paid" {
+		return InitiatePaymentResponse{}, ErrAlreadyProcessed
+	}
+	if b.Status != domain.BookingVerified &&
+		b.Status != domain.BookingScheduled &&
+		b.Status != domain.BookingPaymentFailed {
 		return InitiatePaymentResponse{}, ErrInvalidStatusForAction
 	}
 

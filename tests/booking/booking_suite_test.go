@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -27,9 +28,13 @@ type fakeProvider struct {
 	verifyStatus      string
 	verifyAmountCents int
 	verifyCurrency    string
+	initErr           error
 }
 
 func (f *fakeProvider) InitiatePayment(ctx context.Context, req booking.PaymentInitRequest) (booking.PaymentInitResult, error) {
+	if f.initErr != nil {
+		return booking.PaymentInitResult{}, f.initErr
+	}
 	return booking.PaymentInitResult{CheckoutURL: "https://pay.test/checkout", TxRef: req.TxRef}, nil
 }
 
@@ -115,6 +120,7 @@ func (s *BookingTestSuite) SetupTest() {
 	s.provider.verifyStatus = "success"
 	s.provider.verifyAmountCents = 10000
 	s.provider.verifyCurrency = "ETB"
+	s.provider.initErr = nil
 	s.cleanDB()
 	s.seedUsers()
 }
@@ -238,6 +244,43 @@ func (s *BookingTestSuite) TestScheduleBookingAndPaymentFlow() {
 	paidData := s.bookingData(bookingID)
 	require.Equal(s.T(), "confirmed", paidData["status"])
 	require.Equal(s.T(), "paid", paidData["payment_status"])
+}
+
+func (s *BookingTestSuite) TestPaymentAcceptsFrontendProviderMetadataPayload() {
+	bookingID := s.createScheduledBooking()
+	payBody := map[string]any{
+		"amount_cents": 10000,
+		"currency":     "ETB",
+		"provider":     "chapa",
+		"metadata": map[string]any{
+			"bookingId":     bookingID,
+			"institutionId": s.instituteID.String(),
+		},
+	}
+
+	w := s.request("POST", "/bookings/"+bookingID+"/payments", s.candidateT, payBody)
+	require.Equal(s.T(), http.StatusCreated, w.Code)
+}
+
+func (s *BookingTestSuite) TestPaymentCanRetryAfterProviderFailure() {
+	bookingID := s.createScheduledBooking()
+	s.provider.initErr = errors.New("provider unavailable")
+
+	payBody := map[string]any{"amount_cents": 10000, "currency": "ETB"}
+	w := s.request("POST", "/bookings/"+bookingID+"/payments", s.candidateT, payBody)
+	require.Equal(s.T(), http.StatusBadGateway, w.Code)
+
+	failedData := s.bookingData(bookingID)
+	require.Equal(s.T(), "payment_failed", failedData["status"])
+	require.Equal(s.T(), "failed", failedData["payment_status"])
+
+	s.provider.initErr = nil
+	w = s.request("POST", "/bookings/"+bookingID+"/payments", s.candidateT, payBody)
+	require.Equal(s.T(), http.StatusCreated, w.Code)
+
+	pendingData := s.bookingData(bookingID)
+	require.Equal(s.T(), "payment_pending", pendingData["status"])
+	require.Equal(s.T(), "pending", pendingData["payment_status"])
 }
 
 func (s *BookingTestSuite) TestChapaGetCallbackConfirmsPayment() {

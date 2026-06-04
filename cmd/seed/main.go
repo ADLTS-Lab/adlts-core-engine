@@ -432,7 +432,7 @@ func upsertCandidate(ctx context.Context, tx pgx.Tx, id uuid.UUID, firstName, la
 		)
 		VALUES (
 			$1,$2,'',$3,$4,$5,'active',
-			'+251911100000',$6,$7,'male','','CMC','Addis Ababa','Addis Ababa','Ethiopia',
+			'+251900123456',$6,$7,'male','','CMC','Addis Ababa','Addis Ababa','Ethiopia',
 			NOW(),NOW(),$8,$8
 		)
 		ON CONFLICT (email) DO UPDATE SET

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 )
 
@@ -76,6 +77,17 @@ func TestChapaProviderVerifyTransactionParsesStringAmountAndCurrency(t *testing.
 	}
 	if got.Currency != "ETB" {
 		t.Fatalf("expected ETB currency, got %q", got.Currency)
+	}
+}
+
+func TestGenerateTxRefFitsChapaLimit(t *testing.T) {
+	got := generateTxRef("10000000-0000-4000-8000-000000000081")
+
+	if len(got) > 50 {
+		t.Fatalf("expected tx_ref to fit Chapa 50 character limit, got %d: %q", len(got), got)
+	}
+	if !strings.HasPrefix(got, "adlts_100000000000400080000000_") {
+		t.Fatalf("expected compact booking prefix, got %q", got)
 	}
 }
 

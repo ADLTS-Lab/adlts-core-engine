@@ -180,7 +180,12 @@ func (c *ChapaProvider) ValidateWebhookSignature(payload []byte, signatures ...s
 
 // generateTxRef produces a unique, traceable transaction reference.
 func generateTxRef(bookingID string) string {
-	return fmt.Sprintf("adlts_booking_%s_%d", bookingID, time.Now().UnixNano())
+	compactBookingID := strings.ReplaceAll(bookingID, "-", "")
+	if len(compactBookingID) > 24 {
+		compactBookingID = compactBookingID[:24]
+	}
+	nonce := strconv.FormatInt(time.Now().UnixNano(), 36)
+	return fmt.Sprintf("adlts_%s_%s", compactBookingID, nonce)
 }
 
 func hmacSHA256Hex(secret, data []byte) string {

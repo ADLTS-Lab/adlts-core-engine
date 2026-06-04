@@ -25,15 +25,21 @@ func (r *CreateBookingRequest) Validate() error {
 // VerifyBookingRequest is sent by an admin or the institute.
 type VerifyBookingRequest struct {
 	Action          string `json:"action"`
+	Status          string `json:"status"`
 	RejectionReason string `json:"rejection_reason"`
 }
 
 func (r *VerifyBookingRequest) Validate() error {
+	if r.Action == "" {
+		switch r.Status {
+		case "Approved", "approved", "verified":
+			r.Action = "approve"
+		case "Rejected", "rejected":
+			r.Action = "reject"
+		}
+	}
 	if r.Action != "approve" && r.Action != "reject" {
 		return ErrInvalidVerifyAction
-	}
-	if r.Action == "reject" && r.RejectionReason == "" {
-		return ErrMissingRejectionReason
 	}
 	return nil
 }
@@ -64,8 +70,10 @@ func (r *RescheduleBookingRequest) Validate() error {
 
 // InitiatePaymentRequest is sent by the candidate to start a payment.
 type InitiatePaymentRequest struct {
-	AmountCents int    `json:"amount_cents"`
-	Currency    string `json:"currency"`
+	AmountCents int            `json:"amount_cents"`
+	Currency    string         `json:"currency"`
+	Provider    string         `json:"provider,omitempty"`
+	Metadata    map[string]any `json:"metadata,omitempty"`
 }
 
 func (r *InitiatePaymentRequest) Validate() error {
@@ -110,23 +118,33 @@ func (r *CreateSlotRequest) Validate() error {
 // -------------------------------------------------------
 
 type BookingResponse struct {
-	ID                   string  `json:"id"`
-	CandidateID          string  `json:"candidate_id"`
-	InstituteID          string  `json:"institute_id"`
-	TestID               *string `json:"test_id,omitempty"`
-	SlotID               *string `json:"slot_id,omitempty"`
-	Status               string  `json:"status"`
-	RequiresVerification bool    `json:"requires_verification"`
-	VerifiedBy           *string `json:"verified_by,omitempty"`
-	VerifiedAt           *string `json:"verified_at,omitempty"`
-	RejectionReason      *string `json:"rejection_reason,omitempty"`
-	ScheduledAt          *string `json:"scheduled_at,omitempty"`
-	PaymentStatus        string  `json:"payment_status"`
-	PaymentAmountCents   *int    `json:"payment_amount_cents,omitempty"`
-	PaymentAttempts      int     `json:"payment_attempts"`
-	ArchivedAt           *string `json:"archived_at,omitempty"`
-	CreatedAt            string  `json:"created_at"`
-	UpdatedAt            string  `json:"updated_at"`
+	ID                   string                           `json:"id"`
+	CandidateID          string                           `json:"candidate_id"`
+	InstituteID          string                           `json:"institute_id"`
+	InstitutionName      *string                          `json:"institution_name,omitempty"`
+	CandidateDetails     *BookingCandidateDetailsResponse `json:"candidate_details,omitempty"`
+	TestID               *string                          `json:"test_id,omitempty"`
+	SlotID               *string                          `json:"slot_id,omitempty"`
+	Status               string                           `json:"status"`
+	RequiresVerification bool                             `json:"requires_verification"`
+	VerifiedBy           *string                          `json:"verified_by,omitempty"`
+	VerifiedAt           *string                          `json:"verified_at,omitempty"`
+	RejectionReason      *string                          `json:"rejection_reason,omitempty"`
+	ScheduledAt          *string                          `json:"scheduled_at,omitempty"`
+	PaymentStatus        string                           `json:"payment_status"`
+	PaymentAmountCents   *int                             `json:"payment_amount_cents,omitempty"`
+	PaymentAttempts      int                              `json:"payment_attempts"`
+	ArchivedAt           *string                          `json:"archived_at,omitempty"`
+	CreatedAt            string                           `json:"created_at"`
+	UpdatedAt            string                           `json:"updated_at"`
+}
+
+type BookingCandidateDetailsResponse struct {
+	CandidateID string  `json:"candidate_id"`
+	Name        string  `json:"name"`
+	Email       *string `json:"email,omitempty"`
+	Phone       *string `json:"phone,omitempty"`
+	FayidaID    *string `json:"fayida_id,omitempty"`
 }
 
 type SlotResponse struct {

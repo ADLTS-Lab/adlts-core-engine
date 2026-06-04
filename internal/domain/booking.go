@@ -41,6 +41,11 @@ type Booking struct {
 	ID                   uuid.UUID     `db:"id"`
 	CandidateID          uuid.UUID     `db:"candidate_id"`
 	InstituteID          uuid.UUID     `db:"institute_id"`
+	CandidateName        *string       `db:"candidate_name"`
+	CandidateEmail       *string       `db:"candidate_email"`
+	CandidatePhone       *string       `db:"candidate_phone"`
+	CandidateFayidaID    *string       `db:"candidate_fayida_id"`
+	InstituteName        *string       `db:"institute_name"`
 	TestID               *uuid.UUID    `db:"test_id"`
 	SlotID               *uuid.UUID    `db:"slot_id"`
 	Status               BookingStatus `db:"status"`

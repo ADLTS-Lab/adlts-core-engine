@@ -2,10 +2,14 @@ package main
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"log"
 	"log/slog"
+	"net/url"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 
@@ -18,11 +22,11 @@ import (
 )
 
 func main() {
-	_ = godotenv.Load()
+	loadLocalEnv()
 
 	cfg := config.Load()
-	if cfg.DatabaseURL == "" {
-		log.Fatal("DATABASE_URL is required")
+	if err := validateRuntimeConfig(cfg); err != nil {
+		log.Fatal(err)
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
@@ -57,4 +61,46 @@ func main() {
 		logger.Error("shutdown error", "err", err)
 	}
 	logger.Info("goodbye")
+}
+
+func loadLocalEnv() {
+	if os.Getenv("RENDER") == "true" {
+		return
+	}
+	_ = godotenv.Load()
+}
+
+func validateRuntimeConfig(cfg config.Config) error {
+	if cfg.DatabaseURL == "" {
+		return errors.New("DATABASE_URL is required")
+	}
+	if os.Getenv("RENDER") == "true" && databaseURLUsesLocalhost(cfg.DatabaseURL) {
+		return fmt.Errorf("DATABASE_URL points to localhost on Render; set DATABASE_URL to the Render Postgres internal database URL instead of the local development value")
+	}
+	return nil
+}
+
+func databaseURLUsesLocalhost(databaseURL string) bool {
+	if parsed, err := url.Parse(databaseURL); err == nil && parsed.Hostname() != "" {
+		return isLocalhost(parsed.Hostname())
+	}
+
+	// pgx also supports keyword/value DSNs such as "host=localhost dbname=...".
+	for _, part := range strings.Fields(databaseURL) {
+		key, value, ok := strings.Cut(part, "=")
+		if !ok || strings.TrimSpace(key) != "host" {
+			continue
+		}
+		return isLocalhost(strings.Trim(strings.TrimSpace(value), `"'`))
+	}
+	return false
+}
+
+func isLocalhost(host string) bool {
+	switch strings.ToLower(strings.Trim(host, "[]")) {
+	case "localhost", "127.0.0.1", "::1":
+		return true
+	default:
+		return false
+	}
 }

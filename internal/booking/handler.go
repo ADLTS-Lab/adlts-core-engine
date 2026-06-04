@@ -456,6 +456,7 @@ func toBookingResponse(b domain.Booking) BookingResponse {
 		ID:                   b.ID.String(),
 		CandidateID:          b.CandidateID.String(),
 		InstituteID:          b.InstituteID.String(),
+		InstitutionName:      b.InstituteName,
 		Status:               string(b.Status),
 		RequiresVerification: b.RequiresVerification,
 		PaymentStatus:        b.PaymentStatus,
@@ -463,6 +464,15 @@ func toBookingResponse(b domain.Booking) BookingResponse {
 		PaymentAttempts:      b.PaymentAttempts,
 		CreatedAt:            b.CreatedAt.Format(time.RFC3339),
 		UpdatedAt:            b.UpdatedAt.Format(time.RFC3339),
+	}
+	if b.CandidateName != nil && *b.CandidateName != "" {
+		resp.CandidateDetails = &BookingCandidateDetailsResponse{
+			CandidateID: b.CandidateID.String(),
+			Name:        *b.CandidateName,
+			Email:       b.CandidateEmail,
+			Phone:       b.CandidatePhone,
+			FayidaID:    b.CandidateFayidaID,
+		}
 	}
 	if b.TestID != nil {
 		s := b.TestID.String()
