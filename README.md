@@ -132,7 +132,7 @@ docker-compose up -d
 - **HTTP Router**: chi/v5 composable middleware for logging, recovery, timeout enforcement
 - **File Management**: Upload validation, media streaming, byte-range request support
 - **Object Storage**: MinIO S3-compatible API for recordings and analysis artifacts
-- **Email**: SMTP client with asynchronous delivery and template support
+- **Email**: SMTP delivery with TLS/STARTTLS support and text/HTML message bodies
 - **External Services**: Chapa (payments), Gemini (AI summaries), Python CV (video analysis)
 
 ## Configuration
@@ -163,12 +163,17 @@ Optional variables with defaults:
 | `SMTP_USER` | empty | Email server username |
 | `SMTP_PASSWORD` | empty | Email server password |
 | `SMTP_FROM` | noreply@adlts.et | Sender email address |
+| `SMTP_FROM_NAME` | ADLTS | Sender display name |
+| `SMTP_ENCRYPTION` | auto | SMTP encryption mode: `auto`, `starttls`, `tls`, or `none` |
+| `SMTP_TIMEOUT_SECONDS` | 10 | SMTP connection and delivery timeout |
 | `MINIO_ENDPOINT` | localhost:9000 | Object storage endpoint |
 | `MINIO_BUCKET` | recordings | Storage bucket name |
 | `LANE_DETECTOR_URL` | http://localhost:8000 | Python CV service URL |
 | `GEMINI_API_KEY` | empty | AI text generation API key |
 
-Copy `.env.example` and customize for your environment.
+For local development, `docker compose up` starts Mailpit and configures the API to send OTP, password reset, and invitation emails to it. Open `http://localhost:8025` to inspect captured messages.
+
+For production, set `SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, `SMTP_PASSWORD`, `SMTP_FROM`, and the appropriate `SMTP_ENCRYPTION` value for your provider.
 
 ## API Usage
 

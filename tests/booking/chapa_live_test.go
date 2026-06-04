@@ -77,7 +77,7 @@ func TestChapaProvider_LiveSmoke(t *testing.T) {
 		Email:       "smoke-test@adlts.et",
 		FirstName:   "Smoke",
 		LastName:    "Test",
-		Phone:       "+251900000000",
+		Phone:       "0900000000",
 		CallbackURL: "https://example.com/api/v1/bookings/00000000-0000-0000-0000-000000000000/payments/callback",
 		ReturnURL:   "https://example.com/payment/return",
 	})

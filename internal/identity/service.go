@@ -16,9 +16,8 @@ import (
 	"github.com/google/uuid"
 )
 
-// BaseURL is the public-facing URL used to build links in emails.
-// Set via APP_URL env var; falls back to localhost for dev.
-var BaseURL = "http://localhost:8080"
+// BaseURL is the public-facing frontend URL used to build links in emails.
+var BaseURL = "http://localhost:3000"
 
 type Service struct {
 	repo   *Repository
@@ -294,6 +293,14 @@ func (s *Service) issueToken(id uuid.UUID, et security.EntityType, email string,
 // ── Password flows ────────────────────────────────────────────────────────────
 
 func (s *Service) ForgotPassword(ctx context.Context, email string) error {
+	exists, err := s.emailRegistered(ctx, email)
+	if err != nil {
+		return err
+	}
+	if !exists {
+		return nil
+	}
+
 	token := uuid.NewString()
 	expiresAt := time.Now().UTC().Add(15 * time.Minute)
 	if err := s.repo.UpsertPasswordResetToken(ctx, email, token, expiresAt); err != nil {
@@ -435,7 +442,9 @@ func (s *Service) CreateInvitation(ctx context.Context, auth *security.AuthConte
 	}
 
 	inviteLink := fmt.Sprintf("%s/accept-invitation?token=%s", BaseURL, inv.Token)
-	_ = s.mail.SendInvitation(inv.Email, inv.EntityType, inviteLink)
+	if err := s.mail.SendInvitation(inv.Email, inv.EntityType, inviteLink); err != nil {
+		return nil, fmt.Errorf("send invitation: %w", err)
+	}
 
 	return inv, nil
 }
@@ -577,7 +586,9 @@ func (s *Service) ResendInvitation(ctx context.Context, auth *security.AuthConte
 	}
 
 	inviteLink := fmt.Sprintf("%s/accept-invitation?token=%s", BaseURL, newToken)
-	_ = s.mail.SendInvitation(inv.Email, inv.EntityType, inviteLink)
+	if err := s.mail.SendInvitation(inv.Email, inv.EntityType, inviteLink); err != nil {
+		return fmt.Errorf("send invitation: %w", err)
+	}
 
 	return nil
 }
@@ -608,6 +619,45 @@ func (s *Service) sendOTP(ctx context.Context, email string) error {
 		return fmt.Errorf("store otp: %w", err)
 	}
 	return s.mail.SendOTP(email, code)
+}
+
+func (s *Service) emailRegistered(ctx context.Context, email string) (bool, error) {
+	checks := []func(context.Context, string) (bool, error){
+		func(ctx context.Context, email string) (bool, error) {
+			c, err := s.repo.CandidateByEmail(ctx, email)
+			return c != nil, err
+		},
+		func(ctx context.Context, email string) (bool, error) {
+			e, err := s.repo.ExpertByEmail(ctx, email)
+			return e != nil, err
+		},
+		func(ctx context.Context, email string) (bool, error) {
+			a, err := s.repo.AdminByEmail(ctx, email)
+			return a != nil, err
+		},
+		func(ctx context.Context, email string) (bool, error) {
+			sa, err := s.repo.SuperAdminByEmail(ctx, email)
+			return sa != nil, err
+		},
+		func(ctx context.Context, email string) (bool, error) {
+			inst, err := s.repo.InstituteByEmail(ctx, email)
+			return inst != nil, err
+		},
+		func(ctx context.Context, email string) (bool, error) {
+			auth, err := s.repo.AuthorityByEmail(ctx, email)
+			return auth != nil, err
+		},
+	}
+	for _, check := range checks {
+		ok, err := check(ctx, email)
+		if err != nil {
+			return false, err
+		}
+		if ok {
+			return true, nil
+		}
+	}
+	return false, nil
 }
 
 func randomDigits(n int) (string, error) {

@@ -29,12 +29,14 @@ type Config struct {
 	ChapaWebhookSecret string
 	ChapaBaseURL       string
 
-	SMTPHost     string
-	SMTPPort     string
-	SMTPUser     string
-	SMTPPassword string
-	SMTPFrom     string
-	SMTPFromName string
+	SMTPHost           string
+	SMTPPort           string
+	SMTPUser           string
+	SMTPPassword       string
+	SMTPFrom           string
+	SMTPFromName       string
+	SMTPEncryption     string
+	SMTPTimeoutSeconds int
 
 	// ── Testing Core ─────────────────────────────────────────────────────────
 	MinioEndpoint  string
@@ -82,12 +84,14 @@ func Load() Config {
 		ChapaWebhookSecret: getEnv("CHAPA_WEBHOOK_SECRET", ""),
 		ChapaBaseURL:       getEnv("CHAPA_BASE_URL", "https://api.chapa.co/v1"),
 
-		SMTPHost:     getEnv("SMTP_HOST", "smtp.gmail.com"),
-		SMTPPort:     getEnv("SMTP_PORT", "587"),
-		SMTPUser:     getEnv("SMTP_USER", ""),
-		SMTPPassword: getEnv("SMTP_PASSWORD", ""),
-		SMTPFrom:     getEnv("SMTP_FROM", ""),
-		SMTPFromName: getEnv("SMTP_FROM_NAME", "ADLTS"),
+		SMTPHost:           getEnv("SMTP_HOST", ""),
+		SMTPPort:           getEnv("SMTP_PORT", "587"),
+		SMTPUser:           getEnv("SMTP_USER", ""),
+		SMTPPassword:       getEnv("SMTP_PASSWORD", ""),
+		SMTPFrom:           getEnv("SMTP_FROM", "noreply@adlts.et"),
+		SMTPFromName:       getEnv("SMTP_FROM_NAME", "ADLTS"),
+		SMTPEncryption:     getEnv("SMTP_ENCRYPTION", "auto"),
+		SMTPTimeoutSeconds: getEnvInt("SMTP_TIMEOUT_SECONDS", 10),
 
 		// Testing Core
 		MinioEndpoint:  getEnv("MINIO_ENDPOINT", "localhost:9000"),

@@ -30,8 +30,17 @@ func Build(cfg config.Config, db *pgxpool.Pool, logger *slog.Logger) *http.Serve
 	media.MaxFileSize = cfg.MediaMaxSizeMB * 1024 * 1024
 
 	tokens := security.NewManager(cfg.JWTSecret)
-	mail := mailer.New(cfg.SMTPHost, cfg.SMTPPort, cfg.SMTPUser, cfg.SMTPPassword, cfg.SMTPFrom, cfg.SMTPFromName)
-	identity.BaseURL = cfg.BaseURL
+	mail := mailer.NewSMTP(mailer.Config{
+		Host:       cfg.SMTPHost,
+		Port:       cfg.SMTPPort,
+		User:       cfg.SMTPUser,
+		Password:   cfg.SMTPPassword,
+		From:       cfg.SMTPFrom,
+		FromName:   cfg.SMTPFromName,
+		Encryption: mailer.Encryption(cfg.SMTPEncryption),
+		Timeout:    time.Duration(cfg.SMTPTimeoutSeconds) * time.Second,
+	})
+	identity.BaseURL = cfg.FrontendBaseURL
 	identitySvc := identity.NewService(identity.NewRepository(db), tokens, mail)
 
 	// Seed root super-admin gracefully
@@ -46,6 +55,7 @@ func Build(cfg config.Config, db *pgxpool.Pool, logger *slog.Logger) *http.Serve
 		mail,
 		cfg.BaseURL,
 		cfg.FrontendBaseURL,
+		cfg.InternalAPIKey,
 	)
 	bookingHandler := booking.NewHandler(bookingSvc, tokens)
 

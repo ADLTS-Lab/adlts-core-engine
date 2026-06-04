@@ -9,7 +9,11 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"math"
 	"net/http"
+	"net/url"
+	"strconv"
+	"strings"
 	"time"
 )
 
@@ -29,23 +33,29 @@ func NewChapaProvider(secretKey, webhookSecret, baseURL string) *ChapaProvider {
 	return &ChapaProvider{
 		secretKey:     secretKey,
 		webhookSecret: webhookSecret,
-		baseURL:       baseURL,
+		baseURL:       strings.TrimRight(baseURL, "/"),
 		httpClient:    &http.Client{Timeout: 15 * time.Second},
 	}
 }
 
 // InitiatePayment calls POST /transaction/initialize on Chapa.
 func (c *ChapaProvider) InitiatePayment(ctx context.Context, req PaymentInitRequest) (PaymentInitResult, error) {
+	if strings.TrimSpace(c.secretKey) == "" {
+		return PaymentInitResult{}, fmt.Errorf("chapa: secret key is not configured")
+	}
+
 	body := map[string]any{
 		"amount":       fmt.Sprintf("%.2f", float64(req.AmountCents)/100.0),
 		"currency":     req.Currency,
 		"email":        req.Email,
 		"first_name":   req.FirstName,
 		"last_name":    req.LastName,
-		"phone_number": req.Phone,
 		"tx_ref":       req.TxRef,
 		"callback_url": req.CallbackURL,
 		"return_url":   req.ReturnURL,
+	}
+	if phone := normalizeChapaPhone(req.Phone); phone != "" {
+		body["phone_number"] = phone
 	}
 
 	rawBody, err := json.Marshal(body)
@@ -93,8 +103,12 @@ func (c *ChapaProvider) InitiatePayment(ctx context.Context, req PaymentInitRequ
 
 // VerifyTransaction calls GET /transaction/verify/{tx_ref} on Chapa.
 func (c *ChapaProvider) VerifyTransaction(ctx context.Context, txRef string) (PaymentVerifyResult, error) {
+	if strings.TrimSpace(c.secretKey) == "" {
+		return PaymentVerifyResult{}, fmt.Errorf("chapa: secret key is not configured")
+	}
+
 	httpReq, err := http.NewRequestWithContext(ctx, http.MethodGet,
-		c.baseURL+"/transaction/verify/"+txRef, nil)
+		c.baseURL+"/transaction/verify/"+url.PathEscape(txRef), nil)
 	if err != nil {
 		return PaymentVerifyResult{}, fmt.Errorf("chapa: build verify request: %w", err)
 	}
@@ -114,9 +128,10 @@ func (c *ChapaProvider) VerifyTransaction(ctx context.Context, txRef string) (Pa
 		Status  string `json:"status"`
 		Message string `json:"message"`
 		Data    struct {
-			Status string  `json:"status"`
-			TxRef  string  `json:"tx_ref"`
-			Amount float64 `json:"amount"`
+			Status   string          `json:"status"`
+			TxRef    string          `json:"tx_ref"`
+			Amount   json.RawMessage `json:"amount"`
+			Currency string          `json:"currency"`
 		} `json:"data"`
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&chapaResp); err != nil {
@@ -128,23 +143,92 @@ func (c *ChapaProvider) VerifyTransaction(ctx context.Context, txRef string) (Pa
 	if chapaResp.Data.TxRef == "" {
 		return PaymentVerifyResult{}, fmt.Errorf("chapa: verify failed: missing tx_ref")
 	}
+	amountCents, err := parseChapaAmountCents(chapaResp.Data.Amount)
+	if err != nil {
+		return PaymentVerifyResult{}, fmt.Errorf("chapa: verify failed: invalid amount: %w", err)
+	}
 
 	return PaymentVerifyResult{
 		TxRef:       chapaResp.Data.TxRef,
-		Status:      chapaResp.Data.Status,
-		AmountCents: int(chapaResp.Data.Amount * 100),
+		Status:      strings.ToLower(chapaResp.Data.Status),
+		AmountCents: amountCents,
+		Currency:    strings.ToUpper(chapaResp.Data.Currency),
 	}, nil
 }
 
-// ValidateWebhookSignature verifies the x-chapa-signature header.
-func (c *ChapaProvider) ValidateWebhookSignature(payload []byte, signature string) bool {
-	mac := hmac.New(sha256.New, []byte(c.webhookSecret))
-	mac.Write(payload)
-	expected := hex.EncodeToString(mac.Sum(nil))
-	return hmac.Equal([]byte(expected), []byte(signature))
+// ValidateWebhookSignature verifies Chapa webhook signatures.
+func (c *ChapaProvider) ValidateWebhookSignature(payload []byte, signatures ...string) bool {
+	secret := strings.TrimSpace(c.webhookSecret)
+	if secret == "" {
+		return false
+	}
+
+	expectedPayloadSignature := hmacSHA256Hex([]byte(secret), payload)
+	expectedSecretSignature := hmacSHA256Hex([]byte(secret), []byte(secret))
+	for _, signature := range signatures {
+		signature = strings.TrimSpace(signature)
+		if signature == "" {
+			continue
+		}
+		if hmac.Equal([]byte(expectedPayloadSignature), []byte(signature)) ||
+			hmac.Equal([]byte(expectedSecretSignature), []byte(signature)) {
+			return true
+		}
+	}
+	return false
 }
 
 // generateTxRef produces a unique, traceable transaction reference.
 func generateTxRef(bookingID string) string {
-	return fmt.Sprintf("adlts_booking_%s_%d", bookingID, time.Now().Unix())
+	return fmt.Sprintf("adlts_booking_%s_%d", bookingID, time.Now().UnixNano())
+}
+
+func hmacSHA256Hex(secret, data []byte) string {
+	mac := hmac.New(sha256.New, secret)
+	mac.Write(data)
+	return hex.EncodeToString(mac.Sum(nil))
+}
+
+func parseChapaAmountCents(raw json.RawMessage) (int, error) {
+	s := strings.TrimSpace(string(raw))
+	if s == "" || s == "null" {
+		return 0, nil
+	}
+	s = strings.Trim(s, `"`)
+	amount, err := strconv.ParseFloat(s, 64)
+	if err != nil {
+		return 0, err
+	}
+	return int(math.Round(amount * 100)), nil
+}
+
+func normalizeChapaPhone(phone string) string {
+	p := strings.TrimSpace(phone)
+	if p == "" {
+		return ""
+	}
+	replacer := strings.NewReplacer(" ", "", "-", "", "(", "", ")", "")
+	p = replacer.Replace(p)
+
+	switch {
+	case strings.HasPrefix(p, "+251"):
+		p = "0" + strings.TrimPrefix(p, "+251")
+	case strings.HasPrefix(p, "251"):
+		p = "0" + strings.TrimPrefix(p, "251")
+	case (strings.HasPrefix(p, "9") || strings.HasPrefix(p, "7")) && len(p) == 9:
+		p = "0" + p
+	}
+
+	if len(p) != 10 {
+		return ""
+	}
+	if !strings.HasPrefix(p, "09") && !strings.HasPrefix(p, "07") {
+		return ""
+	}
+	for _, r := range p {
+		if r < '0' || r > '9' {
+			return ""
+		}
+	}
+	return p
 }

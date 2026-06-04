@@ -2,6 +2,7 @@ package booking
 
 import (
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"strconv"
@@ -224,7 +225,7 @@ func (h *Handler) initiatePayment(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) handleChapaWebhook(w http.ResponseWriter, r *http.Request) {
-	_, err := parseID(r, "id")
+	bookingID, err := parseID(r, "id")
 	if err != nil {
 		httpx.Failure(w, http.StatusBadRequest, "INVALID_ID", "id must be a valid UUID", nil)
 		return
@@ -236,17 +237,18 @@ func (h *Handler) handleChapaWebhook(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	sig := r.Header.Get("x-chapa-signature")
-	if sig == "" {
-		sig = r.Header.Get("chapa-signature")
-	}
-	if !h.svc.provider.ValidateWebhookSignature(rawBody, sig) {
+	if !h.svc.provider.ValidateWebhookSignature(
+		rawBody,
+		r.Header.Get("x-chapa-signature"),
+		r.Header.Get("chapa-signature"),
+	) {
 		httpx.Failure(w, http.StatusUnauthorized, "INVALID_SIGNATURE", "invalid webhook signature", nil)
 		return
 	}
 
 	var event struct {
 		TxRef  string `json:"tx_ref"`
+		TrxRef string `json:"trx_ref"`
 		Status string `json:"status"`
 	}
 	if err := json.Unmarshal(rawBody, &event); err != nil {
@@ -255,12 +257,39 @@ func (h *Handler) handleChapaWebhook(w http.ResponseWriter, r *http.Request) {
 	}
 
 	_ = event.Status
-	if err := h.svc.HandleChapaWebhook(r.Context(), event.TxRef); err != nil {
+	txRef := event.TxRef
+	if txRef == "" {
+		txRef = event.TrxRef
+	}
+	if err := h.svc.HandleChapaTransaction(r.Context(), bookingID, txRef); err != nil {
 		// Return 200 to avoid provider retries; errors are handled internally.
-		w.WriteHeader(http.StatusOK)
+		httpx.Success(w, http.StatusOK, map[string]string{"status": "received"}, nil)
 		return
 	}
-	w.WriteHeader(http.StatusOK)
+	httpx.Success(w, http.StatusOK, map[string]string{"status": "processed"}, nil)
+}
+
+func (h *Handler) handleChapaCallback(w http.ResponseWriter, r *http.Request) {
+	bookingID, err := parseID(r, "id")
+	if err != nil {
+		httpx.Failure(w, http.StatusBadRequest, "INVALID_ID", "id must be a valid UUID", nil)
+		return
+	}
+
+	txRef := r.URL.Query().Get("tx_ref")
+	if txRef == "" {
+		txRef = r.URL.Query().Get("trx_ref")
+	}
+	if txRef == "" {
+		httpx.Failure(w, http.StatusBadRequest, "MISSING_TX_REF", "tx_ref is required", nil)
+		return
+	}
+
+	if err := h.svc.HandleChapaTransaction(r.Context(), bookingID, txRef); err != nil {
+		handleServiceError(w, err)
+		return
+	}
+	httpx.Success(w, http.StatusOK, map[string]string{"status": "processed"}, nil)
 }
 
 func (h *Handler) retryPayment(w http.ResponseWriter, r *http.Request) {
@@ -394,6 +423,14 @@ func handleServiceError(w http.ResponseWriter, err error) {
 		ErrMissingSlotID, ErrInvalidSlotTimes, ErrMissingSlotTimes:
 		httpx.Failure(w, http.StatusBadRequest, "INVALID_REQUEST", err.Error(), nil)
 	default:
+		if errors.Is(err, ErrPaymentProvider) {
+			httpx.Failure(w, http.StatusBadGateway, "PAYMENT_PROVIDER_ERROR", "payment provider error", nil)
+			return
+		}
+		if errors.Is(err, ErrPaymentVerificationMismatch) {
+			httpx.Failure(w, http.StatusUnprocessableEntity, "PAYMENT_VERIFICATION_MISMATCH", err.Error(), nil)
+			return
+		}
 		httpx.Failure(w, http.StatusInternalServerError, "SERVER_ERROR", "internal error", nil)
 	}
 }

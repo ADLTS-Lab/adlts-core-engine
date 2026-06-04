@@ -12,7 +12,7 @@ type PaymentProvider interface {
 	VerifyTransaction(ctx context.Context, txRef string) (PaymentVerifyResult, error)
 
 	// ValidateWebhookSignature verifies the provider webhook signature.
-	ValidateWebhookSignature(payload []byte, signature string) bool
+	ValidateWebhookSignature(payload []byte, signatures ...string) bool
 }
 
 // PaymentInitRequest contains everything needed to start a payment session.
@@ -39,4 +39,5 @@ type PaymentVerifyResult struct {
 	TxRef       string
 	Status      string
 	AmountCents int
+	Currency    string
 }

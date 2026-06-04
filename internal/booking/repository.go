@@ -2,6 +2,7 @@ package booking
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -110,14 +111,14 @@ func (r *Repository) CreateSlot(ctx context.Context, s domain.Slot, createdBy uu
 
 	const q = `
 		INSERT INTO slots
-			(id, institute_id, test_id, starts_at, ends_at, capacity, booked_count,
+			(id, institute_id, test_center_id, test_id, starts_at, ends_at, capacity, booked_count,
 			 start_time, end_time, created_at, updated_at, created_by, updated_by)
 		VALUES
-			($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)
+			($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)
 		RETURNING ` + slotCols
 
 	row := r.db.QueryRow(ctx, q,
-		s.ID, s.InstituteID, s.TestID, s.StartsAt, s.EndsAt, s.Capacity, s.BookedCount,
+		s.ID, s.InstituteID, s.TestCenterID, s.TestID, s.StartsAt, s.EndsAt, s.Capacity, s.BookedCount,
 		s.StartsAt, s.EndsAt, s.CreatedAt, s.UpdatedAt, createdBy, createdBy,
 	)
 	return scanSlot(row)
@@ -250,6 +251,39 @@ func (r *Repository) LatestPaymentAttemptNumber(ctx context.Context, bookingID u
 	return n, err
 }
 
+type TestCreationDetails struct {
+	BookingID     uuid.UUID
+	CandidateID   uuid.UUID
+	TestCenterID  uuid.UUID
+	TestLevelCode string
+}
+
+func (r *Repository) TestCreationDetails(ctx context.Context, bookingID uuid.UUID) (TestCreationDetails, error) {
+	var d TestCreationDetails
+	var testCenterID uuid.NullUUID
+	err := r.db.QueryRow(ctx, `
+		SELECT
+			b.id,
+			b.candidate_id,
+			COALESCE(b.test_center_id, s.test_center_id),
+			COALESCE(NULLIF(b.test_level_code, ''), 'class_b')
+		FROM bookings b
+		LEFT JOIN slots s ON s.id = b.slot_id
+		WHERE b.id = $1
+	`, bookingID).Scan(&d.BookingID, &d.CandidateID, &testCenterID, &d.TestLevelCode)
+	if err != nil {
+		if err == pgx.ErrNoRows {
+			return TestCreationDetails{}, ErrBookingNotFound
+		}
+		return TestCreationDetails{}, err
+	}
+	if !testCenterID.Valid {
+		return TestCreationDetails{}, errors.New("booking test center is not set")
+	}
+	d.TestCenterID = testCenterID.UUID
+	return d, nil
+}
+
 // -------------------------------------------------------
 // Lookup helpers
 // -------------------------------------------------------
@@ -330,7 +364,7 @@ func scanBookingRow(rows pgx.Rows) (domain.Booking, error) {
 func scanSlot(row scannable) (domain.Slot, error) {
 	var s domain.Slot
 	err := row.Scan(
-		&s.ID, &s.InstituteID, &s.TestID, &s.StartsAt, &s.EndsAt,
+		&s.ID, &s.InstituteID, &s.TestCenterID, &s.TestID, &s.StartsAt, &s.EndsAt,
 		&s.Capacity, &s.BookedCount, &s.CreatedAt, &s.UpdatedAt,
 	)
 	if err != nil {
@@ -413,7 +447,7 @@ const bookingCols = `id, candidate_id, institute_id, test_id, slot_id, status,
 	payment_ref, payment_status, payment_amount_cents, payment_attempts, archived_at,
 	created_at, updated_at`
 
-const slotCols = `id, institute_id, test_id, starts_at, ends_at, capacity,
+const slotCols = `id, institute_id, test_center_id, test_id, starts_at, ends_at, capacity,
 	booked_count, created_at, updated_at`
 
 const paymentCols = `id, booking_id, amount_cents, currency, status, provider,
